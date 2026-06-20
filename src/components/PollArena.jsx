@@ -1,8 +1,18 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
 import { T } from "../theme";
 import { fetchHeadToHead } from "../api/stats";
 import MatchupShare from "./MatchupShare";
+
+const VOTED_KEY = "taste-polls-voted";
+
+function getVotedPolls() {
+  try {
+    return JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
 
 function PollCard({ item, onClick, isWinner, isLoser, showResult }) {
   return (
@@ -101,14 +111,41 @@ function PollCard({ item, onClick, isWinner, isLoser, showResult }) {
 }
 
 export default function PollArena({ poll, onVote, onBack }) {
-  const [voted, setVoted] = useState(false);
-  const [winner, setWinner] = useState(null);
-  const [loser, setLoser] = useState(null);
+  const existingVote = getVotedPolls()[poll.id];
+  const alreadyVoted = !!existingVote;
+
+  const [voted, setVoted] = useState(alreadyVoted);
+  const [winner, setWinner] = useState(
+    alreadyVoted
+      ? (existingVote.pickedId === poll.itemA.id ? poll.itemA : poll.itemB)
+      : null
+  );
+  const [loser, setLoser] = useState(
+    alreadyVoted
+      ? (existingVote.pickedId === poll.itemA.id ? poll.itemB : poll.itemA)
+      : null
+  );
   const [h2hLabel, setH2hLabel] = useState(null);
 
   const { itemA, itemB } = poll;
 
+  // Fetch results on mount if already voted
+  useEffect(() => {
+    if (!alreadyVoted) return;
+    const picked = existingVote.pickedId === itemA.id ? itemA : itemB;
+    fetchHeadToHead(itemA.id, itemB.id).then((h2h) => {
+      if (h2h && h2h.total > 0) {
+        const aWins = existingVote.pickedId === itemA.id ? h2h.aWins : h2h.bWins;
+        const pct = Math.round((aWins / h2h.total) * 100);
+        setH2hLabel(`${pct}% picked ${picked.name}`);
+      } else {
+        setH2hLabel(`You picked ${picked.name}`);
+      }
+    });
+  }, [alreadyVoted]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handlePick = (picked, other) => {
+    if (alreadyVoted) return; // one vote per device
     setWinner(picked);
     setLoser(other);
     setVoted(true);
@@ -125,12 +162,11 @@ export default function PollArena({ poll, onVote, onBack }) {
     });
   };
 
-  const pollUrl = (pair) =>
+  const pollUrl = () =>
     `${window.location.origin}${window.location.pathname}?poll=${poll.id}`;
 
   const copyPollLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}?poll=${poll.id}`;
-    navigator.clipboard.writeText(url).catch(() => {});
+    navigator.clipboard.writeText(pollUrl()).catch(() => {});
   };
 
   return (
@@ -207,7 +243,7 @@ export default function PollArena({ poll, onVote, onBack }) {
       </div>
 
       {voted && (
-        <div style={{ marginTop: 28, animation: "rise .3s ease both" }}>
+        <div style={{ marginTop: 28, animation: alreadyVoted ? "none" : "rise .3s ease both" }}>
           {h2hLabel && (
             <div
               className="disp"

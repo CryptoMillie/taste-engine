@@ -1,24 +1,80 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { T } from "../theme";
 import { POLL_CATEGORIES } from "../data/polls";
+import { fetchHeadToHead } from "../api/stats";
 
 const VOTED_KEY = "taste-polls-voted";
 
 function getVotedPolls() {
   try {
-    return JSON.parse(localStorage.getItem(VOTED_KEY) || "[]");
+    return JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
   } catch {
-    return [];
+    return {};
   }
 }
 
-function PollCard({ poll, isVoted, onSelect }) {
+function ResultBar({ poll, pickedId }) {
+  const [pctA, setPctA] = useState(null);
+
+  useEffect(() => {
+    fetchHeadToHead(poll.itemA.id, poll.itemB.id).then((h2h) => {
+      if (h2h && h2h.total > 0) {
+        setPctA(Math.round((h2h.aWins / h2h.total) * 100));
+      } else {
+        // No server data — show 50/50 as placeholder
+        setPctA(pickedId === poll.itemA.id ? 100 : 0);
+      }
+    });
+  }, [poll, pickedId]);
+
+  if (pctA === null) return null;
+  const pctB = 100 - pctA;
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 10,
+          fontWeight: 700,
+          marginBottom: 3,
+        }}
+      >
+        <span style={{ color: pctA >= pctB ? T.pop : T.soft }}>{pctA}%</span>
+        <span style={{ color: pctB > pctA ? T.pop : T.soft }}>{pctB}%</span>
+      </div>
+      <div
+        style={{
+          height: 6,
+          borderRadius: 3,
+          background: T.line,
+          overflow: "hidden",
+          display: "flex",
+        }}
+      >
+        <div
+          style={{
+            width: `${pctA}%`,
+            background: T.pop,
+            borderRadius: "3px 0 0 3px",
+            transition: "width 0.4s ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PollCard({ poll, voteData, onSelect }) {
+  const isVoted = !!voteData;
+
   return (
     <button
       onClick={() => onSelect(poll)}
       style={{
         background: T.card,
-        border: `1.5px solid ${T.line}`,
+        border: `1.5px solid ${isVoted ? "#22c55e44" : T.line}`,
         borderRadius: 18,
         padding: 0,
         cursor: "pointer",
@@ -158,6 +214,7 @@ function PollCard({ poll, isVoted, onSelect }) {
         >
           {poll.label}
         </div>
+        {isVoted && <ResultBar poll={poll} pickedId={voteData.pickedId} />}
       </div>
     </button>
   );
@@ -249,7 +306,7 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
           <PollCard
             key={poll.id}
             poll={poll}
-            isVoted={votedPolls.includes(poll.id)}
+            voteData={votedPolls[poll.id] || null}
             onSelect={onSelectPoll}
           />
         ))}

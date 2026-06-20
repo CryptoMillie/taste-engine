@@ -66,14 +66,23 @@ function parsePollFromURL() {
   return POLLS.find((p) => p.id === pollId) || null;
 }
 
-function markPollVoted(pollId) {
+function markPollVoted(pollId, pickedId) {
   try {
-    const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "[]");
-    if (!voted.includes(pollId)) {
-      voted.push(pollId);
+    const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
+    if (!voted[pollId]) {
+      voted[pollId] = { pickedId, votedAt: Date.now() };
       localStorage.setItem(VOTED_KEY, JSON.stringify(voted));
     }
   } catch { /* ignore */ }
+}
+
+function isPollVoted(pollId) {
+  try {
+    const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
+    return !!voted[pollId];
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -246,10 +255,13 @@ export default function App() {
   };
 
   const handlePollVote = (poll, winner, loser) => {
+    // One vote per device per poll
+    if (isPollVoted(poll.id)) return;
+
     store.current.vote(winner.id, loser.id);
     setVotes((v) => v + 1);
     setItems(store.current.getItems());
-    markPollVoted(poll.id);
+    markPollVoted(poll.id, winner.id);
 
     // Background vote sync
     submitVote({
