@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, Link2 } from "lucide-react";
+import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp } from "lucide-react";
 import { createStore, pickPair } from "./engine/store";
 import { loadAllItems } from "./engine/items";
 import { pickPairWithCampaigns } from "./engine/pairing";
@@ -17,6 +17,10 @@ import CampaignBanner from "./components/CampaignBanner";
 import Profile from "./components/Profile";
 import TasteDNA from "./components/TasteDNA";
 import Challenge from "./components/Challenge";
+import MatchupShare from "./components/MatchupShare";
+import TrendingPolls from "./components/TrendingPolls";
+import PollArena from "./components/PollArena";
+import { POLLS } from "./data/polls";
 
 function Stat({ label, value, color }) {
   return (
@@ -53,66 +57,23 @@ const btnStyle = {
   fontWeight: 600,
 };
 
-const socialBtnStyle = (bg) => ({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  background: bg,
-  border: "none",
-  color: "#fff",
-  padding: "8px 14px",
-  borderRadius: 99,
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-});
+const VOTED_KEY = "taste-polls-voted";
 
-function MatchupShare({ pair, onCopyLink }) {
-  const challengeUrl = `${window.location.origin}${window.location.pathname}?challenge=${pair[0].id},${pair[1].id}`;
-  const text = `${pair[0].name} vs ${pair[1].name} — which do you prefer?`;
+function parsePollFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const pollId = params.get("poll");
+  if (!pollId) return null;
+  return POLLS.find((p) => p.id === pollId) || null;
+}
 
-  const shareX = () =>
-    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(challengeUrl)}`, "_blank");
-  const shareFB = () =>
-    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(challengeUrl)}&quote=${encodeURIComponent(text)}`, "_blank");
-  const shareWA = () =>
-    window.open(`https://wa.me/?text=${encodeURIComponent(text + " " + challengeUrl)}`, "_blank");
-  const shareTG = () =>
-    window.open(`https://t.me/share/url?url=${encodeURIComponent(challengeUrl)}&text=${encodeURIComponent(text)}`, "_blank");
-  const shareReddit = () =>
-    window.open(`https://www.reddit.com/submit?url=${encodeURIComponent(challengeUrl)}&title=${encodeURIComponent(text)}`, "_blank");
-
-  return (
-    <div style={{ textAlign: "center", marginTop: 22 }}>
-      <div
-        className="mono"
-        style={{ fontSize: 10, letterSpacing: "0.16em", color: T.soft, marginBottom: 10 }}
-      >
-        CHALLENGE A FRIEND
-      </div>
-      <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-        <button onClick={onCopyLink} style={socialBtnStyle(T.ink)}>
-          <Link2 size={13} /> Copy Link
-        </button>
-        <button onClick={shareX} style={socialBtnStyle("#000000")}>
-          𝕏
-        </button>
-        <button onClick={shareFB} style={socialBtnStyle("#1877F2")}>
-          Facebook
-        </button>
-        <button onClick={shareWA} style={socialBtnStyle("#25D366")}>
-          WhatsApp
-        </button>
-        <button onClick={shareTG} style={socialBtnStyle("#26A5E4")}>
-          Telegram
-        </button>
-        <button onClick={shareReddit} style={socialBtnStyle("#FF4500")}>
-          Reddit
-        </button>
-      </div>
-    </div>
-  );
+function markPollVoted(pollId) {
+  try {
+    const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "[]");
+    if (!voted.includes(pollId)) {
+      voted.push(pollId);
+      localStorage.setItem(VOTED_KEY, JSON.stringify(voted));
+    }
+  } catch { /* ignore */ }
 }
 
 /**
@@ -132,7 +93,7 @@ export default function App() {
   const store = useRef(createStore());
   const [items, setItems] = useState(store.current.getItems());
   const [pair, setPair] = useState(() => pickPair(store.current.getItems()));
-  const [view, setView] = useState("arena");
+  const [view, setView] = useState(() => parsePollFromURL() ? "pollArena" : "arena");
   const [votes, setVotes] = useState(store.current.getVotes());
   const [contrarian, setContrarian] = useState(store.current.getContrarian());
   const [crossCat, setCrossCat] = useState(store.current.getCrossCat());
@@ -143,6 +104,14 @@ export default function App() {
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [lastPair, setLastPair] = useState(null);
   const [challengeIds, setChallengeIds] = useState(() => parseChallengeFromURL());
+  const [activePoll, setActivePoll] = useState(() => {
+    const poll = parsePollFromURL();
+    if (poll) {
+      // Merge poll items into store on load
+      store.current.mergeNewItems([poll.itemA, poll.itemB]);
+    }
+    return poll;
+  });
 
   const { sessionId, markPairShown, recordPick } = useSession();
   const { campaigns } = useCampaigns();
@@ -267,6 +236,36 @@ export default function App() {
     window.history.replaceState({}, "", window.location.pathname);
   };
 
+  const handleSelectPoll = (poll) => {
+    // Merge poll items into the store so they get Elo records
+    store.current.mergeNewItems([poll.itemA, poll.itemB]);
+    setItems(store.current.getItems());
+    setActivePoll(poll);
+    setView("pollArena");
+    window.history.pushState({}, "", `?poll=${poll.id}`);
+  };
+
+  const handlePollVote = (poll, winner, loser) => {
+    store.current.vote(winner.id, loser.id);
+    setVotes((v) => v + 1);
+    setItems(store.current.getItems());
+    markPollVoted(poll.id);
+
+    // Background vote sync
+    submitVote({
+      userId,
+      winnerId: winner.id,
+      loserId: loser.id,
+      sessionId,
+    });
+  };
+
+  const handlePollBack = () => {
+    setActivePoll(null);
+    setView("polls");
+    window.history.replaceState({}, "", window.location.pathname);
+  };
+
   useEffect(() => {
     if (!flash) return;
     const t = setTimeout(() => setFlash(null), 2600);
@@ -381,6 +380,24 @@ export default function App() {
               <Sparkles size={16} />
             </button>
           )}
+          <button
+            onClick={() => {
+              if (view === "polls" || view === "pollArena") {
+                setActivePoll(null);
+                setView("arena");
+                window.history.replaceState({}, "", window.location.pathname);
+              } else {
+                setView("polls");
+              }
+            }}
+            style={{
+              ...btnStyle,
+              background: view === "polls" || view === "pollArena" ? T.pop : T.ink,
+            }}
+            title="Trending Polls"
+          >
+            <TrendingUp size={16} /> Trending
+          </button>
           <button onClick={() => setView(view === "arena" ? "rankings" : "arena")} style={btnStyle}>
             {view === "arena" || view === "tasteDNA" ? (
               <>
@@ -464,6 +481,10 @@ export default function App() {
             REAL TRENDING DATA · YOUR TAPS BUILD THE RANKING
           </p>
         </main>
+      ) : view === "polls" ? (
+        <TrendingPolls polls={POLLS} onSelectPoll={handleSelectPoll} />
+      ) : view === "pollArena" && activePoll ? (
+        <PollArena poll={activePoll} onVote={handlePollVote} onBack={handlePollBack} />
       ) : view === "profile" ? (
         <Profile userId={userId} votes={votes} />
       ) : (
