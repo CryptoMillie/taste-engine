@@ -9,12 +9,13 @@ export const socialBtnStyle = (bg) => ({
   background: bg,
   border: "none",
   color: "#fff",
-  padding: "8px 14px",
+  padding: "10px 16px",
   borderRadius: 99,
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",
   whiteSpace: "nowrap",
+  minHeight: 44,
 });
 
 export default function MatchupShare({ pair, onCopyLink, heading, urlBuilder }) {

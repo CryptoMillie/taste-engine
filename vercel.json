@@ -6,6 +6,11 @@
       "destination": "/api/poll-meta?poll=$poll"
     },
     {
+      "source": "/",
+      "has": [{ "type": "query", "key": "challenge", "value": "(?<challenge>.+)" }],
+      "destination": "/api/challenge-meta?challenge=$challenge"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

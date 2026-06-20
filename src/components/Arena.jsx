@@ -1,7 +1,7 @@
 import React from "react";
 import { T } from "../theme";
 
-export default function Arena({ pair, verdict, onChoose }) {
+export default function Arena({ pair, verdict, onChoose, campaignItemIds }) {
   return (
     <div
       style={{
@@ -15,15 +15,16 @@ export default function Arena({ pair, verdict, onChoose }) {
       {pair.map((it, idx) => {
         const isWin = verdict?.winnerId === it.id;
         const isLose = verdict && !isWin;
+        const isSponsored = campaignItemIds?.includes(it.id);
         return (
           <React.Fragment key={it.id}>
             <button
-              onClick={() => onChoose(it, pair[1 - idx])}
+              onClick={() => onChoose(it, pair[1 - idx], idx)}
               className={`card ${isWin ? "win" : ""} ${isLose ? "lose" : ""}`}
               style={{
-                flex: "1 1 340px",
+                flex: "1 1 280px",
                 maxWidth: 460,
-                minHeight: 420,
+                minHeight: "min(420px, 55vh)",
                 border: "none",
                 cursor: "pointer",
                 borderRadius: 26,
@@ -48,23 +49,38 @@ export default function Arena({ pair, verdict, onChoose }) {
                     "linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.72) 100%)",
                 }}
               />
-              <span
-                className="mono"
-                style={{
-                  position: "absolute",
-                  top: 16,
-                  left: 18,
-                  fontSize: 10,
-                  letterSpacing: "0.14em",
-                  color: "#fff",
-                  background: "rgba(0,0,0,.4)",
-                  padding: "4px 9px",
-                  borderRadius: 99,
-                  backdropFilter: "blur(4px)",
-                }}
-              >
-                {it.cat.toUpperCase()}
-              </span>
+              <div style={{ position: "absolute", top: 16, left: 18, display: "flex", gap: 6 }}>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 10,
+                    letterSpacing: "0.14em",
+                    color: "#fff",
+                    background: "rgba(0,0,0,.4)",
+                    padding: "4px 9px",
+                    borderRadius: 99,
+                    backdropFilter: "blur(4px)",
+                  }}
+                >
+                  {it.cat.toUpperCase()}
+                </span>
+                {isSponsored && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 9,
+                      letterSpacing: "0.12em",
+                      color: "#fff",
+                      background: "rgba(255,59,31,.85)",
+                      padding: "4px 9px",
+                      borderRadius: 99,
+                      fontWeight: 700,
+                    }}
+                  >
+                    SPONSORED
+                  </span>
+                )}
+              </div>
               <div style={{ position: "absolute", left: 24, bottom: 22, right: 24 }}>
                 <div
                   className="disp"

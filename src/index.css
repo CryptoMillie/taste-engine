@@ -58,6 +58,13 @@ body {
   transform: scale(.96);
 }
 
+/* Hide button labels on small screens — icons remain */
+@media (max-width: 520px) {
+  .header-label {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card, .win, .tick, .rise {
     animation: none !important;

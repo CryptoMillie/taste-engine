@@ -64,9 +64,9 @@ function PollCard({ item, onClick, isWinner, isLoser, showResult }) {
       onClick={onClick}
       disabled={showResult}
       style={{
-        flex: "1 1 280px",
+        flex: "1 1 260px",
         maxWidth: 420,
-        minHeight: 380,
+        minHeight: "min(380px, 50vh)",
         border: "none",
         cursor: showResult ? "default" : "pointer",
         borderRadius: 22,

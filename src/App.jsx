@@ -55,6 +55,9 @@ const btnStyle = {
   fontSize: 15,
   cursor: "pointer",
   fontWeight: 600,
+  minHeight: 44,
+  minWidth: 44,
+  justifyContent: "center",
 };
 
 const VOTED_KEY = "taste-polls-voted";
@@ -373,70 +376,72 @@ export default function App() {
             ENGINE
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Stat label="VERDICTS" value={votes} color={T.ink} />
           <Stat
             label="YOUR TASTE"
             value={tasteLabel}
             color={tasteLabel === "Contrarian" ? T.pop : T.ink}
           />
-          {votes >= 20 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {votes >= 20 && (
+              <button
+                onClick={() => setView(view === "tasteDNA" ? "arena" : "tasteDNA")}
+                style={{
+                  ...btnStyle,
+                  background: view === "tasteDNA" ? T.pop : T.ink,
+                }}
+                title="Taste DNA"
+              >
+                <Sparkles size={16} />
+              </button>
+            )}
             <button
-              onClick={() => setView(view === "tasteDNA" ? "arena" : "tasteDNA")}
+              onClick={() => {
+                if (view === "polls" || view === "pollArena") {
+                  setActivePoll(null);
+                  setView("arena");
+                  window.history.replaceState({}, "", window.location.pathname);
+                } else {
+                  setView("polls");
+                }
+              }}
               style={{
                 ...btnStyle,
-                background: view === "tasteDNA" ? T.pop : T.ink,
+                background: view === "polls" || view === "pollArena" ? T.pop : T.ink,
               }}
-              title="Taste DNA"
+              title="Trending Polls"
             >
-              <Sparkles size={16} />
+              <TrendingUp size={16} /> <span className="header-label">Trending</span>
             </button>
-          )}
-          <button
-            onClick={() => {
-              if (view === "polls" || view === "pollArena") {
-                setActivePoll(null);
-                setView("arena");
-                window.history.replaceState({}, "", window.location.pathname);
-              } else {
-                setView("polls");
-              }
-            }}
-            style={{
-              ...btnStyle,
-              background: view === "polls" || view === "pollArena" ? T.pop : T.ink,
-            }}
-            title="Trending Polls"
-          >
-            <TrendingUp size={16} /> Trending
-          </button>
-          <button onClick={() => setView(view === "arena" ? "rankings" : "arena")} style={btnStyle}>
-            {view === "arena" || view === "tasteDNA" ? (
-              <>
-                <Trophy size={16} /> Rankings
-              </>
-            ) : (
-              <>
-                <ArrowLeft size={16} /> Back
-              </>
-            )}
-          </button>
-          <button
-            onClick={() => setView(view === "profile" ? "arena" : "profile")}
-            style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
-            title="Profile"
-          >
-            <User size={16} />
-          </button>
-          {votes > 0 && (
+            <button onClick={() => setView(view === "arena" ? "rankings" : "arena")} style={btnStyle}>
+              {view === "arena" || view === "tasteDNA" ? (
+                <>
+                  <Trophy size={16} /> <span className="header-label">Rankings</span>
+                </>
+              ) : (
+                <>
+                  <ArrowLeft size={16} /> <span className="header-label">Back</span>
+                </>
+              )}
+            </button>
             <button
-              onClick={handleReset}
-              style={{ ...btnStyle, background: "transparent", color: T.soft, padding: "10px 8px" }}
-              title="Reset rankings"
+              onClick={() => setView(view === "profile" ? "arena" : "profile")}
+              style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
+              title="Profile"
             >
-              <RotateCcw size={16} />
+              <User size={16} />
             </button>
-          )}
+            {votes > 0 && (
+              <button
+                onClick={handleReset}
+                style={{ ...btnStyle, background: "transparent", color: T.soft, padding: "10px 8px" }}
+                title="Reset rankings"
+              >
+                <RotateCcw size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </header>
 

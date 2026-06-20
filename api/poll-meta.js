@@ -1,10 +1,12 @@
 /**
- * Vercel Serverless Function — Returns index.html with poll-specific OG meta tags.
- * Social crawlers (Facebook, Twitter, etc.) get personalized previews.
- * URL: /api/poll-meta?poll=poll-jordan-lebron
+ * Vercel Serverless Function — Social sharing OG meta handler.
+ *
+ * Crawlers (Facebook, Twitter/X, LinkedIn, etc.) get a lightweight HTML page
+ * packed with OG tags + the dynamic og:image URL.
+ *
+ * Real browsers get a 302 redirect to /index.html?poll=... which serves
+ * the static SPA build directly (bypasses the rewrite rule).
  */
-import { readFileSync } from "fs";
-import { join } from "path";
 
 const POLLS = {
   "poll-jordan-lebron": { a: "Michael Jordan", b: "LeBron James", label: "The GOAT debate" },
@@ -29,11 +31,40 @@ const POLLS = {
   "poll-tesla-porsche": { a: "Tesla", b: "Porsche", label: "Future vs heritage" },
 };
 
-function escHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Common social media / SEO crawler user-agent fragments
+const CRAWLER_PATTERNS = [
+  "facebookexternalhit",
+  "Facebot",
+  "Twitterbot",
+  "LinkedInBot",
+  "Slackbot",
+  "TelegramBot",
+  "WhatsApp",
+  "Discordbot",
+  "Googlebot",
+  "bingbot",
+  "Pinterestbot",
+  "redditbot",
+  "Applebot",
+  "Embedly",
+  "Quora Link Preview",
+  "Showyoubot",
+  "outbrain",
+  "vkShare",
+  "W3C_Validator",
+  "Iframely",
+  "developers.google.com",
+];
+
+function isCrawler(ua) {
+  if (!ua) return false;
+  const lower = ua.toLowerCase();
+  return CRAWLER_PATTERNS.some((p) => lower.includes(p.toLowerCase()));
 }
 
-let cachedHtml = null;
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 export default function handler(req, res) {
   const { poll } = req.query;
@@ -44,34 +75,42 @@ export default function handler(req, res) {
     return res.end();
   }
 
-  // Read the built index.html (Vercel puts it in the output)
-  if (!cachedHtml) {
-    try {
-      cachedHtml = readFileSync(join(process.cwd(), "dist", "index.html"), "utf-8");
-    } catch {
-      // Fallback: try public
-      try {
-        cachedHtml = readFileSync(join(process.cwd(), "index.html"), "utf-8");
-      } catch {
-        res.writeHead(302, { Location: `/?poll=${poll}` });
-        return res.end();
-      }
-    }
+  const ua = req.headers["user-agent"] || "";
+
+  // Real browsers → redirect to static SPA (bypasses the rewrite)
+  if (!isCrawler(ua)) {
+    res.writeHead(302, { Location: `/index.html?poll=${poll}` });
+    return res.end();
   }
 
-  const title = escHtml(`${data.a} vs ${data.b} — ${data.label}`);
-  const description = escHtml(`${data.a} or ${data.b}? Cast your vote on Taste Engine.`);
+  // Crawlers → serve OG meta tags
+  const title = esc(`${data.a} vs ${data.b} — ${data.label}`);
+  const description = esc(`${data.a} or ${data.b}? Cast your vote on Taste Engine.`);
   const origin = `https://${req.headers.host}`;
   const ogImage = `${origin}/api/og?poll=${poll}`;
+  const canonicalUrl = `${origin}/?poll=${poll}`;
 
-  const html = cachedHtml
-    .replace(/<meta property="og:title"[^>]*\/?>/, `<meta property="og:title" content="${title}" />`)
-    .replace(/<meta property="og:description"[^>]*\/?>/, `<meta property="og:description" content="${description}" />`)
-    .replace(/<meta property="og:image"[^>]*\/?>/, `<meta property="og:image" content="${ogImage}" />`)
-    .replace(/<meta name="twitter:title"[^>]*\/?>/, `<meta name="twitter:title" content="${title}" />`)
-    .replace(/<meta name="twitter:description"[^>]*\/?>/, `<meta name="twitter:description" content="${description}" />`)
-    .replace(/<meta name="twitter:image"[^>]*\/?>/, `<meta name="twitter:image" content="${ogImage}" />`)
-    .replace(/<title>[^<]*<\/title>/, `<title>${title} | Taste Engine</title>`);
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${title} | Taste Engine</title>
+  <meta name="description" content="${description}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Taste Engine" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${description}" />
+  <meta property="og:image" content="${ogImage}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:url" content="${canonicalUrl}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${title}" />
+  <meta name="twitter:description" content="${description}" />
+  <meta name="twitter:image" content="${ogImage}" />
+</head>
+<body></body>
+</html>`;
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "public, s-maxage=86400, max-age=3600");
