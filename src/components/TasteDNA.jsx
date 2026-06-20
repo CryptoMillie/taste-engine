@@ -365,13 +365,66 @@ export default function TasteDNA({ items, votes, contrarian, crossCat, onBack })
     link.click();
   };
 
+  const shareText = `I'm "${archetype}" on Taste Engine. What's your taste DNA?`;
+  const shareUrl = "https://taste-engine-seven.vercel.app";
+
   const handleShareX = () => {
-    const text = `I'm "${archetype}" on Taste Engine. What's your taste DNA?`;
-    const url = "https://taste-engine-seven.vercel.app";
     window.open(
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`,
       "_blank"
     );
+  };
+
+  const handleShareFacebook = () => {
+    window.open(
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}`,
+      "_blank"
+    );
+  };
+
+  const handleShareWhatsApp = () => {
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}`,
+      "_blank"
+    );
+  };
+
+  const handleShareTelegram = () => {
+    window.open(
+      `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`,
+      "_blank"
+    );
+  };
+
+  const handleShareReddit = () => {
+    window.open(
+      `https://www.reddit.com/submit?url=${encodeURIComponent(shareUrl)}&title=${encodeURIComponent(shareText)}`,
+      "_blank"
+    );
+  };
+
+  const handleShareLinkedIn = () => {
+    window.open(
+      `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
+      "_blank"
+    );
+  };
+
+  const handleNativeShare = async () => {
+    if (!navigator.share) return;
+    const canvas = canvasRef.current;
+    try {
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      const file = new File([blob], "taste-dna.png", { type: "image/png" });
+      await navigator.share({
+        title: "My Taste DNA",
+        text: shareText,
+        url: shareUrl,
+        files: [file],
+      });
+    } catch {
+      // User cancelled or unsupported
+    }
   };
 
   const shareBtnStyle = {
@@ -387,6 +440,13 @@ export default function TasteDNA({ items, votes, contrarian, crossCat, onBack })
     fontWeight: 500,
     cursor: "pointer",
   };
+
+  const socialBtnStyle = (bg) => ({
+    ...shareBtnStyle,
+    background: bg,
+    border: "none",
+    color: "#fff",
+  });
 
   return (
     <div
@@ -406,6 +466,8 @@ export default function TasteDNA({ items, votes, contrarian, crossCat, onBack })
           boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
         }}
       />
+
+      {/* Utility buttons */}
       <div
         style={{
           display: "flex",
@@ -422,8 +484,40 @@ export default function TasteDNA({ items, votes, contrarian, crossCat, onBack })
         <button onClick={handleDownload} style={shareBtnStyle}>
           <Download size={15} /> Save PNG
         </button>
-        <button onClick={handleShareX} style={shareBtnStyle}>
-          <Share2 size={15} /> Share to X
+        {navigator.share && (
+          <button onClick={handleNativeShare} style={shareBtnStyle}>
+            <Share2 size={15} /> Share
+          </button>
+        )}
+      </div>
+
+      {/* Social share buttons */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          justifyContent: "center",
+          marginTop: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <button onClick={handleShareX} style={socialBtnStyle("#000000")}>
+          𝕏 Post
+        </button>
+        <button onClick={handleShareFacebook} style={socialBtnStyle("#1877F2")}>
+          Facebook
+        </button>
+        <button onClick={handleShareWhatsApp} style={socialBtnStyle("#25D366")}>
+          WhatsApp
+        </button>
+        <button onClick={handleShareTelegram} style={socialBtnStyle("#26A5E4")}>
+          Telegram
+        </button>
+        <button onClick={handleShareReddit} style={socialBtnStyle("#FF4500")}>
+          Reddit
+        </button>
+        <button onClick={handleShareLinkedIn} style={socialBtnStyle("#0A66C2")}>
+          LinkedIn
         </button>
       </div>
     </div>
