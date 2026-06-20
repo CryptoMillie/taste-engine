@@ -2,6 +2,7 @@
  * Elo-based ranking store with localStorage persistence.
  */
 import { SEED_ITEMS } from "../data/seeds";
+import { emptyPrefs, updatePrefs } from "./personalize";
 
 const STORAGE_KEY = "taste-engine-state";
 const BASE = 1200;
@@ -21,11 +22,11 @@ function loadState() {
   }
 }
 
-function saveState(items, votes, contrarian, crossCat) {
+function saveState(items, votes, contrarian, crossCat, prefs) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ items, votes, contrarian, crossCat, savedAt: Date.now() })
+      JSON.stringify({ items, votes, contrarian, crossCat, prefs, savedAt: Date.now() })
     );
   } catch {
     // Storage full or unavailable — degrade silently
@@ -46,6 +47,7 @@ export function createStore(initialItems) {
   let votes = saved?.votes ?? 0;
   let contrarian = saved?.contrarian ?? 0;
   let crossCat = saved?.crossCat ?? 0;
+  let prefs = saved?.prefs ?? emptyPrefs();
 
   // Merge new items that don't exist yet (from trending/Wikidata)
   const mergeNewItems = (newItems) => {
@@ -61,7 +63,7 @@ export function createStore(initialItems) {
       }));
     if (toAdd.length > 0) {
       items = [...items, ...toAdd];
-      saveState(items, votes, contrarian, crossCat);
+      saveState(items, votes, contrarian, crossCat, prefs);
     }
   };
 
@@ -70,9 +72,10 @@ export function createStore(initialItems) {
     getVotes: () => votes,
     getContrarian: () => contrarian,
     getCrossCat: () => crossCat,
+    getPrefs: () => prefs,
     incrementCrossCat: () => {
       crossCat += 1;
-      saveState(items, votes, contrarian, crossCat);
+      saveState(items, votes, contrarian, crossCat, prefs);
     },
     mergeNewItems,
 
@@ -94,8 +97,9 @@ export function createStore(initialItems) {
 
       votes += 1;
       if (upset) contrarian += 1;
+      prefs = updatePrefs(prefs, w, l);
 
-      saveState(items, votes, contrarian, crossCat);
+      saveState(items, votes, contrarian, crossCat, prefs);
 
       return { delta, upset };
     },
@@ -111,6 +115,7 @@ export function createStore(initialItems) {
       votes = 0;
       contrarian = 0;
       crossCat = 0;
+      prefs = emptyPrefs();
       localStorage.removeItem(STORAGE_KEY);
     },
   };

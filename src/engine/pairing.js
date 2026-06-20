@@ -3,6 +3,7 @@
  * Wraps the existing pickPair() and injects campaign items at ~30% rate.
  */
 import { pickPair } from "./store";
+import { pickPairPersonalized } from "./personalize";
 
 /**
  * Pick a pair, potentially injecting a campaign item.
@@ -10,7 +11,7 @@ import { pickPair } from "./store";
  * @param {Array} campaigns - Active campaigns with itemIds
  * @returns {{ pair: [Object, Object], campaignId: string|null }}
  */
-export function pickPairWithCampaigns(items, campaigns) {
+export function pickPairWithCampaigns(items, campaigns, prefs) {
   // Find active campaign with items in our item set
   const activeCampaign = campaigns.find((c) => {
     const rate = Number(c.injection_rate) || 0.3;
@@ -41,6 +42,6 @@ export function pickPairWithCampaigns(items, campaigns) {
     }
   }
 
-  // Fall back to regular pairing
-  return { pair: pickPair(items), campaignId: null };
+  // Fall back to personalized pairing
+  return { pair: prefs ? pickPairPersonalized(items, prefs) : pickPair(items), campaignId: null };
 }

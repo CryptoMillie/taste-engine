@@ -3,6 +3,7 @@ import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, Link2 } from "lucide-reac
 import { createStore, pickPair } from "./engine/store";
 import { loadAllItems } from "./engine/items";
 import { pickPairWithCampaigns } from "./engine/pairing";
+import { pickPairPersonalized } from "./engine/personalize";
 import { scoreVoteQuality, QUALITY_THRESHOLD } from "./api/quality";
 import { submitVote } from "./api/votes";
 import { useSession } from "./hooks/useSession";
@@ -168,12 +169,13 @@ export default function App() {
   const campaignItemIds = activeCampaign?.itemIds ?? [];
 
   const nextPair = useCallback((freshItems) => {
+    const prefs = store.current.getPrefs();
     if (campaigns.length > 0) {
-      const { pair: newPair, campaignId } = pickPairWithCampaigns(freshItems, campaigns);
+      const { pair: newPair, campaignId } = pickPairWithCampaigns(freshItems, campaigns, prefs);
       setPair(newPair);
       setActiveCampaignId(campaignId);
     } else {
-      setPair(pickPair(freshItems));
+      setPair(pickPairPersonalized(freshItems, prefs));
       setActiveCampaignId(null);
     }
     markPairShown();
