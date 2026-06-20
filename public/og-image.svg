@@ -1,0 +1,27 @@
+<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#111111"/>
+  <rect x="0" y="0" width="1200" height="630" fill="url(#grad)" opacity="0.15"/>
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1200" y2="630">
+      <stop offset="0%" stop-color="#FF3B1F"/>
+      <stop offset="100%" stop-color="#111111"/>
+    </linearGradient>
+  </defs>
+  <!-- Corner marks -->
+  <path d="M40 70 L40 40 L70 40" stroke="#FF3B1F" stroke-width="3" fill="none" opacity="0.5"/>
+  <path d="M1130 40 L1160 40 L1160 70" stroke="#FF3B1F" stroke-width="3" fill="none" opacity="0.5"/>
+  <path d="M40 560 L40 590 L70 590" stroke="#FF3B1F" stroke-width="3" fill="none" opacity="0.5"/>
+  <path d="M1130 590 L1160 590 L1160 560" stroke="#FF3B1F" stroke-width="3" fill="none" opacity="0.5"/>
+  <!-- Title -->
+  <text x="600" y="240" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="72" fill="#FFFFFF" letter-spacing="-2">TASTE ENGINE</text>
+  <!-- Subtitle -->
+  <text x="600" y="320" text-anchor="middle" font-family="monospace" font-size="22" fill="#FF3B1F" letter-spacing="6">WHAT'S YOUR TASTE DNA?</text>
+  <!-- Description -->
+  <text x="600" y="400" text-anchor="middle" font-family="system-ui, sans-serif" font-size="24" fill="rgba(255,255,255,0.5)">Vote on trending people, animals, cars, food &amp; more.</text>
+  <text x="600" y="440" text-anchor="middle" font-family="system-ui, sans-serif" font-size="24" fill="rgba(255,255,255,0.5)">Discover your taste archetype.</text>
+  <!-- Radar hint shapes -->
+  <polygon points="200,315 240,280 280,300 270,340 220,345" stroke="#FF3B1F" stroke-width="1.5" fill="rgba(255,59,31,0.15)" opacity="0.4"/>
+  <polygon points="920,315 960,280 1000,300 990,340 940,345" stroke="#FF3B1F" stroke-width="1.5" fill="rgba(255,59,31,0.15)" opacity="0.4"/>
+  <!-- URL -->
+  <text x="600" y="540" text-anchor="middle" font-family="monospace" font-size="16" fill="rgba(255,255,255,0.25)" letter-spacing="2">taste-engine-seven.vercel.app</text>
+</svg>

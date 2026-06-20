@@ -1,10 +1,21 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Trophy, ArrowLeft, Sparkles, RotateCcw } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, Link2 } from "lucide-react";
 import { createStore, pickPair } from "./engine/store";
+import { loadAllItems } from "./engine/items";
+import { pickPairWithCampaigns } from "./engine/pairing";
+import { scoreVoteQuality, QUALITY_THRESHOLD } from "./api/quality";
+import { submitVote } from "./api/votes";
+import { useSession } from "./hooks/useSession";
+import { useCampaigns } from "./hooks/useCampaigns";
+import { useAuth } from "./hooks/useAuth";
 import { T } from "./theme";
 import Arena from "./components/Arena";
 import Rankings from "./components/Rankings";
 import TasteMeter from "./components/TasteMeter";
+import CampaignBanner from "./components/CampaignBanner";
+import Profile from "./components/Profile";
+import TasteDNA from "./components/TasteDNA";
+import Challenge from "./components/Challenge";
 
 function Stat({ label, value, color }) {
   return (
@@ -41,6 +52,19 @@ const btnStyle = {
   fontWeight: 600,
 };
 
+/**
+ * Parse challenge IDs from URL query string.
+ * Format: ?challenge=itemId1,itemId2
+ */
+function parseChallengeFromURL() {
+  const params = new URLSearchParams(window.location.search);
+  const challenge = params.get("challenge");
+  if (!challenge) return null;
+  const ids = challenge.split(",").map((s) => s.trim()).filter(Boolean);
+  if (ids.length === 2) return ids;
+  return null;
+}
+
 export default function App() {
   const store = useRef(createStore());
   const [items, setItems] = useState(store.current.getItems());
@@ -48,11 +72,52 @@ export default function App() {
   const [view, setView] = useState("arena");
   const [votes, setVotes] = useState(store.current.getVotes());
   const [contrarian, setContrarian] = useState(store.current.getContrarian());
+  const [crossCat, setCrossCat] = useState(store.current.getCrossCat());
   const [verdict, setVerdict] = useState(null);
   const [flash, setFlash] = useState(null);
   const [locking, setLocking] = useState(false);
+  const [activeCampaignId, setActiveCampaignId] = useState(null);
+  const [itemsLoaded, setItemsLoaded] = useState(false);
+  const [lastPair, setLastPair] = useState(null);
+  const [challengeIds, setChallengeIds] = useState(() => parseChallengeFromURL());
 
-  const choose = (winner, loser) => {
+  const { sessionId, markPairShown, recordPick } = useSession();
+  const { campaigns } = useCampaigns();
+  const { userId } = useAuth();
+
+  // Load expanded items on mount
+  useEffect(() => {
+    let cancelled = false;
+    loadAllItems().then((loaded) => {
+      if (cancelled || !loaded.length) return;
+      store.current.mergeNewItems(loaded);
+      const fresh = store.current.getItems();
+      setItems(fresh);
+      if (!itemsLoaded) {
+        setPair(pickPair(fresh));
+        setItemsLoaded(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Get campaign item IDs for the current pair
+  const activeCampaign = campaigns.find((c) => c.id === activeCampaignId);
+  const campaignItemIds = activeCampaign?.itemIds ?? [];
+
+  const nextPair = useCallback((freshItems) => {
+    if (campaigns.length > 0) {
+      const { pair: newPair, campaignId } = pickPairWithCampaigns(freshItems, campaigns);
+      setPair(newPair);
+      setActiveCampaignId(campaignId);
+    } else {
+      setPair(pickPair(freshItems));
+      setActiveCampaignId(null);
+    }
+    markPairShown();
+  }, [campaigns, markPairShown]);
+
+  const choose = (winner, loser, pickedIndex) => {
     if (locking) return;
     setLocking(true);
     const cross = winner.cat !== loser.cat;
@@ -60,15 +125,50 @@ export default function App() {
     setVerdict({ winnerId: winner.id, delta });
     setVotes((v) => v + 1);
     if (upset) setContrarian((c) => c + 1);
-    if (cross) setFlash(`${winner.name} over ${loser.name}? Bold.`);
-    else if (upset && Math.random() < 0.5)
+
+    // Track cross-category votes
+    if (cross) {
+      store.current.incrementCrossCat();
+      setCrossCat((c) => c + 1);
+    }
+
+    // Save last pair for challenge link
+    setLastPair([winner, loser]);
+
+    // Quality scoring
+    const pickData = recordPick(pickedIndex ?? 0);
+    const qualityScore = scoreVoteQuality(pickData);
+
+    // Background vote sync
+    submitVote({
+      userId,
+      winnerId: winner.id,
+      loserId: loser.id,
+      campaignId: activeCampaignId,
+      qualityScore,
+      timeTakenMs: pickData.timeTakenMs,
+      sessionId,
+    }).then(({ earned, amount }) => {
+      if (earned) {
+        setFlash(`+$${amount.toFixed(2)} earned!`);
+      }
+    });
+
+    // Flash messages
+    if (activeCampaignId && qualityScore >= QUALITY_THRESHOLD) {
+      // Earning flash handled by submitVote callback above
+    } else if (cross) {
+      setFlash(`${winner.name} over ${loser.name}? Bold.`);
+    } else if (upset && Math.random() < 0.5) {
       setFlash("Rare taste — the crowd leans the other way.");
-    else if ((votes + 1) % 10 === 0)
+    } else if ((votes + 1) % 10 === 0) {
       setFlash(`${votes + 1} verdicts in. You're shaping the ranking.`);
+    }
+
     setTimeout(() => {
       const fresh = store.current.getItems();
       setItems(fresh);
-      setPair(pickPair(fresh));
+      nextPair(fresh);
       setVerdict(null);
       setLocking(false);
     }, 520);
@@ -76,12 +176,31 @@ export default function App() {
 
   const handleReset = () => {
     store.current.reset();
-    setItems(store.current.getItems());
-    setPair(pickPair(store.current.getItems()));
+    const fresh = store.current.getItems();
+    setItems(fresh);
+    nextPair(fresh);
     setVotes(0);
     setContrarian(0);
+    setCrossCat(0);
+    setLastPair(null);
     setVerdict(null);
     setFlash("Rankings reset. Fresh start.");
+  };
+
+  const copyChallenge = () => {
+    if (!lastPair) return;
+    const url = `${window.location.origin}${window.location.pathname}?challenge=${lastPair[0].id},${lastPair[1].id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setFlash("Challenge link copied!");
+    }).catch(() => {
+      setFlash("Couldn't copy — try again.");
+    });
+  };
+
+  const handleEnterApp = () => {
+    setChallengeIds(null);
+    // Clean URL without reload
+    window.history.replaceState({}, "", window.location.pathname);
   };
 
   useEffect(() => {
@@ -103,6 +222,47 @@ export default function App() {
         : cRate > 0.2
           ? "Eclectic"
           : "Mainstream";
+
+  // Challenge mode — takes priority over all views
+  if (challengeIds) {
+    const challengeItemA = items.find((i) => i.id === challengeIds[0]);
+    const challengeItemB = items.find((i) => i.id === challengeIds[1]);
+
+    // If items aren't loaded yet and we're still loading, show spinner
+    if (!itemsLoaded && !challengeItemA && !challengeItemB) {
+      return (
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: T.paper,
+            color: T.soft,
+            fontFamily: "'Inter', system-ui, sans-serif",
+          }}
+        >
+          <div className="mono" style={{ fontSize: 13, letterSpacing: "0.14em" }}>
+            LOADING CHALLENGE...
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <Challenge
+        itemA={challengeItemA}
+        itemB={challengeItemB}
+        onEnterApp={handleEnterApp}
+        onVote={(winner, loser) => {
+          store.current.vote(winner.id, loser.id);
+          setVotes((v) => v + 1);
+          const fresh = store.current.getItems();
+          setItems(fresh);
+        }}
+      />
+    );
+  }
 
   return (
     <div
@@ -145,8 +305,20 @@ export default function App() {
             value={tasteLabel}
             color={tasteLabel === "Contrarian" ? T.pop : T.ink}
           />
+          {votes >= 20 && (
+            <button
+              onClick={() => setView(view === "tasteDNA" ? "arena" : "tasteDNA")}
+              style={{
+                ...btnStyle,
+                background: view === "tasteDNA" ? T.pop : T.ink,
+              }}
+              title="Taste DNA"
+            >
+              <Sparkles size={16} />
+            </button>
+          )}
           <button onClick={() => setView(view === "arena" ? "rankings" : "arena")} style={btnStyle}>
-            {view === "arena" ? (
+            {view === "arena" || view === "tasteDNA" ? (
               <>
                 <Trophy size={16} /> Rankings
               </>
@@ -155,6 +327,13 @@ export default function App() {
                 <ArrowLeft size={16} /> Back
               </>
             )}
+          </button>
+          <button
+            onClick={() => setView(view === "profile" ? "arena" : "profile")}
+            style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
+            title="Profile"
+          >
+            <User size={16} />
           </button>
           {votes > 0 && (
             <button
@@ -168,8 +347,16 @@ export default function App() {
         </div>
       </header>
 
-      {/* Arena view */}
-      {view === "arena" ? (
+      {/* Views */}
+      {view === "tasteDNA" ? (
+        <TasteDNA
+          items={items}
+          votes={votes}
+          contrarian={contrarian}
+          crossCat={crossCat}
+          onBack={() => setView("arena")}
+        />
+      ) : view === "arena" ? (
         <main
           style={{
             maxWidth: 1040,
@@ -188,8 +375,37 @@ export default function App() {
           >
             Which do you <span style={{ color: T.pop }}>prefer</span>?
           </h1>
-          <Arena pair={pair} verdict={verdict} onChoose={choose} />
+          <CampaignBanner campaign={activeCampaign} />
+          <Arena
+            pair={pair}
+            verdict={verdict}
+            onChoose={choose}
+            campaignItemIds={campaignItemIds}
+          />
           <TasteMeter contrarianRate={cRate} />
+
+          {/* Challenge a friend link */}
+          {lastPair && (
+            <div style={{ textAlign: "center", marginTop: 20 }}>
+              <button
+                onClick={copyChallenge}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: T.pop,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Link2 size={14} /> Challenge a friend
+              </button>
+            </div>
+          )}
+
           <p
             className="mono"
             style={{
@@ -203,6 +419,8 @@ export default function App() {
             REAL TRENDING DATA · YOUR TAPS BUILD THE RANKING
           </p>
         </main>
+      ) : view === "profile" ? (
+        <Profile userId={userId} votes={votes} />
       ) : (
         <Rankings ranked={ranked} />
       )}

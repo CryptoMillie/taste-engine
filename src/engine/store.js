@@ -21,35 +21,60 @@ function loadState() {
   }
 }
 
-function saveState(items, votes, contrarian) {
+function saveState(items, votes, contrarian, crossCat) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ items, votes, contrarian, savedAt: Date.now() })
+      JSON.stringify({ items, votes, contrarian, crossCat, savedAt: Date.now() })
     );
   } catch {
     // Storage full or unavailable — degrade silently
   }
 }
 
-export function createStore() {
+export function createStore(initialItems) {
   const saved = loadState();
 
-  let items = saved?.items ?? SEED_ITEMS.map((d, i) => ({
+  let items = saved?.items ?? (initialItems || SEED_ITEMS).map((d, i) => ({
     ...d,
-    id: "i" + i,
-    rating: BASE,
-    comparisons: 0,
-    wins: 0,
+    id: d.id ?? "i" + i,
+    rating: d.rating ?? BASE,
+    comparisons: d.comparisons ?? 0,
+    wins: d.wins ?? 0,
   }));
 
   let votes = saved?.votes ?? 0;
   let contrarian = saved?.contrarian ?? 0;
+  let crossCat = saved?.crossCat ?? 0;
+
+  // Merge new items that don't exist yet (from trending/Wikidata)
+  const mergeNewItems = (newItems) => {
+    const existingIds = new Set(items.map((i) => i.id));
+    const toAdd = newItems
+      .filter((d) => !existingIds.has(d.id))
+      .map((d) => ({
+        ...d,
+        id: d.id ?? "i" + items.length,
+        rating: d.rating ?? BASE,
+        comparisons: d.comparisons ?? 0,
+        wins: d.wins ?? 0,
+      }));
+    if (toAdd.length > 0) {
+      items = [...items, ...toAdd];
+      saveState(items, votes, contrarian, crossCat);
+    }
+  };
 
   return {
     getItems: () => items,
     getVotes: () => votes,
     getContrarian: () => contrarian,
+    getCrossCat: () => crossCat,
+    incrementCrossCat: () => {
+      crossCat += 1;
+      saveState(items, votes, contrarian, crossCat);
+    },
+    mergeNewItems,
 
     vote: (wId, lId) => {
       const w = items.find((i) => i.id === wId);
@@ -70,21 +95,22 @@ export function createStore() {
       votes += 1;
       if (upset) contrarian += 1;
 
-      saveState(items, votes, contrarian);
+      saveState(items, votes, contrarian, crossCat);
 
       return { delta, upset };
     },
 
     reset: () => {
-      items = SEED_ITEMS.map((d, i) => ({
+      items = (initialItems || SEED_ITEMS).map((d, i) => ({
         ...d,
-        id: "i" + i,
+        id: d.id ?? "i" + i,
         rating: BASE,
         comparisons: 0,
         wins: 0,
       }));
       votes = 0;
       contrarian = 0;
+      crossCat = 0;
       localStorage.removeItem(STORAGE_KEY);
     },
   };
