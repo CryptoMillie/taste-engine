@@ -5,6 +5,10 @@
       "has": [{ "type": "query", "key": "poll", "value": "(?<poll>.+)" }],
       "destination": "/api/poll-meta?poll=$poll"
     },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

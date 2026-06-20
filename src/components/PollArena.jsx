@@ -14,6 +14,50 @@ function getVotedPolls() {
   }
 }
 
+function ResultBar({ nameA, nameB, pctA }) {
+  const pctB = 100 - pctA;
+  const aWins = pctA >= pctB;
+
+  return (
+    <div style={{ maxWidth: 500, margin: "0 auto", width: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 6,
+          fontSize: 14,
+          fontWeight: 700,
+        }}
+      >
+        <span style={{ color: aWins ? T.pop : T.soft }}>
+          {nameA} {pctA}%
+        </span>
+        <span style={{ color: !aWins ? T.pop : T.soft }}>
+          {pctB}% {nameB}
+        </span>
+      </div>
+      <div
+        style={{
+          height: 10,
+          borderRadius: 5,
+          background: T.line,
+          overflow: "hidden",
+          display: "flex",
+        }}
+      >
+        <div
+          style={{
+            width: `${pctA}%`,
+            background: T.pop,
+            borderRadius: "5px 0 0 5px",
+            transition: "width 0.6s ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PollCard({ item, onClick, isWinner, isLoser, showResult }) {
   return (
     <button
@@ -125,41 +169,37 @@ export default function PollArena({ poll, onVote, onBack }) {
       ? (existingVote.pickedId === poll.itemA.id ? poll.itemB : poll.itemA)
       : null
   );
-  const [h2hLabel, setH2hLabel] = useState(null);
+  const [resultPctA, setResultPctA] = useState(null);
 
   const { itemA, itemB } = poll;
+
+  const loadResults = (pickedId) => {
+    fetchHeadToHead(itemA.id, itemB.id).then((h2h) => {
+      if (h2h && h2h.total > 0) {
+        setResultPctA(Math.round((h2h.aWins / h2h.total) * 100));
+      } else {
+        // No server data — show your vote as 100%
+        setResultPctA(pickedId === itemA.id ? 100 : 0);
+      }
+    }).catch(() => {
+      setResultPctA(pickedId === itemA.id ? 100 : 0);
+    });
+  };
 
   // Fetch results on mount if already voted
   useEffect(() => {
     if (!alreadyVoted) return;
-    const picked = existingVote.pickedId === itemA.id ? itemA : itemB;
-    fetchHeadToHead(itemA.id, itemB.id).then((h2h) => {
-      if (h2h && h2h.total > 0) {
-        const aWins = existingVote.pickedId === itemA.id ? h2h.aWins : h2h.bWins;
-        const pct = Math.round((aWins / h2h.total) * 100);
-        setH2hLabel(`${pct}% picked ${picked.name}`);
-      } else {
-        setH2hLabel(`You picked ${picked.name}`);
-      }
-    });
+    loadResults(existingVote.pickedId);
   }, [alreadyVoted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePick = (picked, other) => {
-    if (alreadyVoted) return; // one vote per device
+    if (alreadyVoted) return;
     setWinner(picked);
     setLoser(other);
     setVoted(true);
 
     if (onVote) onVote(poll, picked, other);
-
-    fetchHeadToHead(picked.id, other.id).then((h2h) => {
-      if (h2h && h2h.total > 0) {
-        const pct = Math.round((h2h.aWins / h2h.total) * 100);
-        setH2hLabel(`${pct}% picked ${picked.name}`);
-      } else {
-        setH2hLabel(`You picked ${picked.name}`);
-      }
-    });
+    loadResults(picked.id);
   };
 
   const pollUrl = () =>
@@ -244,17 +284,9 @@ export default function PollArena({ poll, onVote, onBack }) {
 
       {voted && (
         <div style={{ marginTop: 28, animation: alreadyVoted ? "none" : "rise .3s ease both" }}>
-          {h2hLabel && (
-            <div
-              className="disp"
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                marginBottom: 20,
-                color: T.ink,
-              }}
-            >
-              {h2hLabel}
+          {resultPctA !== null && (
+            <div style={{ marginBottom: 24 }}>
+              <ResultBar nameA={itemA.name} nameB={itemB.name} pctA={resultPctA} />
             </div>
           )}
 
