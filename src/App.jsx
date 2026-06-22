@@ -3,7 +3,7 @@ import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp } from "lucide
 import { createStore, pickPair } from "./engine/store";
 import { loadAllItems } from "./engine/items";
 import { pickPairWithCampaigns } from "./engine/pairing";
-import { pickPairPersonalized } from "./engine/personalize";
+import { pickPairPersonalized, prefetchAIPair } from "./engine/personalize";
 import { scoreVoteQuality, QUALITY_THRESHOLD } from "./api/quality";
 import { submitVote } from "./api/votes";
 import { useSession } from "./hooks/useSession";
@@ -140,6 +140,8 @@ export default function App() {
       if (!itemsLoaded) {
         setPair(pickPair(fresh));
         setItemsLoaded(true);
+        // Prefetch first AI-suggested pair
+        prefetchAIPair(fresh, store.current.getPrefs());
       }
     });
     return () => { cancelled = true; };
@@ -216,6 +218,8 @@ export default function App() {
       nextPair(fresh);
       setVerdict(null);
       setLocking(false);
+      // Prefetch next AI pair in background
+      prefetchAIPair(fresh, store.current.getPrefs());
     }, 520);
   };
 

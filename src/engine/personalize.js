@@ -1,11 +1,19 @@
 /**
  * Personalized pairing — learns from votes to curate matchups
  * around the user's taste while keeping discovery and chaos intact.
+ * Now with AI-powered pair suggestions via Chutes inference.
  */
+
+import { suggestPair } from "../api/chutes";
+import { getCategoryStats, getArchetype, getTopAndRarest } from "./taste-profile";
 
 const RECENCY_LIMIT = 20;
 const MIN_CATEGORIES_FOR_PERSONALIZATION = 3;
 const FLOOR_WEIGHT = 0.1;
+
+// --- AI pair prefetch cache ---
+let _aiCache = null;      // { a: itemName, b: itemName }
+let _aiFetching = false;
 
 export function emptyPrefs() {
   return { catWins: {}, catSeen: {}, recentIds: [] };
@@ -32,29 +40,93 @@ export function updatePrefs(prefs, winner, loser) {
 }
 
 /**
- * Master 3-tier picker:
- *  14% chaos — cross-category wildcard
- *  36% personalized — affinity-weighted category pick
- *  50% discovery — existing coverage-first + Elo logic
+ * Prefetch an AI-suggested pair in the background.
+ * Call after each vote so the next AI pick is ready instantly.
+ */
+export function prefetchAIPair(items, prefs) {
+  if (_aiFetching || !items.length) return;
+  _aiFetching = true;
+
+  const catStats = getCategoryStats(items);
+  const cRate = 0; // approximate, not critical for suggestion
+  const xRate = 0;
+  const { topPick } = getTopAndRarest(items);
+
+  const profile = {
+    archetype: getArchetype(catStats, cRate, xRate),
+    topPick: topPick?.name || null,
+    categoryStats: Object.fromEntries(
+      Object.entries(catStats).map(([cat, s]) => [cat, Math.round(s.winRate * 100) + "%"])
+    ),
+    recentNames: prefs.recentIds.slice(0, 10),
+  };
+
+  suggestPair(items, profile)
+    .then((result) => {
+      _aiCache = result;
+    })
+    .catch(() => {
+      _aiCache = null;
+    })
+    .finally(() => {
+      _aiFetching = false;
+    });
+}
+
+/**
+ * Try to resolve a cached AI suggestion into actual item objects.
+ * Returns a pair or null if names don't match.
+ */
+function resolveAIPair(items, prefs) {
+  if (!_aiCache) return null;
+
+  const { a, b } = _aiCache;
+  _aiCache = null; // consume it
+
+  const pool = filterRecent(items, prefs.recentIds);
+  const nameMap = new Map(pool.map((i) => [i.name.toLowerCase(), i]));
+
+  const itemA = nameMap.get(a.toLowerCase());
+  const itemB = nameMap.get(b.toLowerCase());
+
+  if (itemA && itemB && itemA.id !== itemB.id) {
+    return Math.random() < 0.5 ? [itemA, itemB] : [itemB, itemA];
+  }
+  return null;
+}
+
+/**
+ * Master 4-tier picker:
+ *  20% AI-suggested — inference-powered interesting matchup (if cached)
+ *  12% chaos — cross-category wildcard
+ *  30% personalized — affinity-weighted category pick
+ *  38% discovery — existing coverage-first + Elo logic
  */
 export function pickPairPersonalized(items, prefs) {
   if (items.length < 2) return items.slice(0, 2);
 
   const roll = Math.random();
 
-  // 14% chaos — cross-category wildcard
-  if (roll < 0.14) {
+  // 20% AI-suggested pair (if one is cached)
+  if (roll < 0.20) {
+    const aiPair = resolveAIPair(items, prefs);
+    if (aiPair) return aiPair;
+    // Fall through if no cached suggestion
+  }
+
+  // 12% chaos — cross-category wildcard
+  if (roll < 0.32) {
     return pickChaos(items, prefs);
   }
 
-  // 36% personalized (only if enough category data)
+  // 30% personalized (only if enough category data)
   const seenCats = Object.keys(prefs.catSeen);
-  if (roll < 0.50 && seenCats.length >= MIN_CATEGORIES_FOR_PERSONALIZATION) {
+  if (roll < 0.62 && seenCats.length >= MIN_CATEGORIES_FOR_PERSONALIZATION) {
     const result = pickPersonalizedPair(items, prefs);
     if (result) return result;
   }
 
-  // 50% discovery (or fallback) — coverage-first + Elo-closest
+  // 38% discovery (or fallback) — coverage-first + Elo-closest
   return pickDiscovery(items, prefs);
 }
 

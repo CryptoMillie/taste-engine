@@ -6,6 +6,7 @@
 import { SEED_ITEMS } from "../data/seeds";
 import { fetchTrending } from "./trending";
 import { fetchAllCategories } from "./wikidata";
+import { fetchTrendingFromDesearch } from "../api/desearch";
 import { supabase } from "../api/supabase";
 
 const BASE = 1200;
@@ -65,10 +66,11 @@ async function syncToSupabase(items) {
 export async function loadAllItems() {
   let all = [...SEED_ITEMS];
 
-  // Fetch trending and Wikidata in parallel, non-blocking
-  const [trendingResult, wikidataResult] = await Promise.allSettled([
+  // Fetch trending, Wikidata, and DeSearch in parallel, non-blocking
+  const [trendingResult, wikidataResult, desearchResult] = await Promise.allSettled([
     fetchTrending(20),
     fetchAllCategories(),
+    fetchTrendingFromDesearch(),
   ]);
 
   if (trendingResult.status === "fulfilled" && trendingResult.value.length) {
@@ -77,6 +79,10 @@ export async function loadAllItems() {
 
   if (wikidataResult.status === "fulfilled" && wikidataResult.value.length) {
     all = [...all, ...wikidataResult.value];
+  }
+
+  if (desearchResult.status === "fulfilled" && desearchResult.value.length) {
+    all = [...all, ...desearchResult.value];
   }
 
   const unique = dedup(all);
