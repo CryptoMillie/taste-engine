@@ -3,9 +3,9 @@
  * OpenAI-compatible API for structured taste reasoning.
  */
 
-const CHUTES_URL = "https://api.chutes.ai/v1/chat/completions";
+const CHUTES_URL = "https://chutes-deepseek-ai-deepseek-v3-2-tee.chutes.ai/v1/chat/completions";
 const CHUTES_KEY = import.meta.env.VITE_CHUTES_API_KEY;
-const MODEL = "deepseek-ai/DeepSeek-V3-0324";
+const MODEL = "deepseek-ai/DeepSeek-V3.2-TEE";
 
 /**
  * Call Chutes inference with a system + user prompt.

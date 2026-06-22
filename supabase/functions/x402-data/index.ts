@@ -15,8 +15,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const RECIPIENT = "0xE007561e6dF35759A890471911fD2d8D64a619D5";
 
-const CHUTES_URL = "https://api.chutes.ai/v1/chat/completions";
-const CHUTES_MODEL = "deepseek-ai/DeepSeek-V3-0324";
+const CHUTES_URL = "https://chutes-deepseek-ai-deepseek-v3-2-tee.chutes.ai/v1/chat/completions";
+const CHUTES_MODEL = "deepseek-ai/DeepSeek-V3.2-TEE";
 
 const PRICES: Record<string, number> = {
   rankings: 0.01,
