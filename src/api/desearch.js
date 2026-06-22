@@ -2,12 +2,14 @@
  * DeSearch API client — pulls trending entities from web + X/Twitter.
  * Expands the item pool dynamically so matchups stay fresh.
  *
- * Uses the /web endpoint for fast JSON responses, then enriches
- * with Wikipedia images.
+ * Uses /web endpoint for search results, then Chutes to extract
+ * clean entity names, then Wikipedia for images.
  */
 
 const DESEARCH_URL = "https://api.desearch.ai/web";
 const DESEARCH_KEY = import.meta.env.VITE_DESEARCH_API_KEY;
+const CHUTES_URL = "https://chutes-deepseek-ai-deepseek-v3-2-tee.chutes.ai/v1/chat/completions";
+const CHUTES_KEY = import.meta.env.VITE_CHUTES_API_KEY;
 
 const WIKI_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary";
 
@@ -15,13 +17,11 @@ const CACHE_KEY = "taste-desearch-cache";
 const CACHE_TTL = 2 * 60 * 60 * 1000; // 2 hours
 
 const CATEGORY_QUERIES = {
-  trending: "most famous celebrities and public figures trending right now 2026",
-  sports: "top trending athletes and sports stars this week 2026",
-  music: "most popular musicians and music artists trending right now 2026",
-  food: "most popular foods and dishes people love 2026",
-  cars: "most popular cars and new car models 2026",
-  animals: "most popular animals and viral pets trending",
-  movies: "top trending movies and TV shows right now 2026",
+  trending: "most famous celebrities trending right now site:wikipedia.org",
+  sports: "top athletes and sports stars 2026 site:wikipedia.org",
+  music: "popular musicians and singers trending 2026 site:wikipedia.org",
+  food: "most popular foods and dishes worldwide site:wikipedia.org",
+  movies: "top trending movies and TV shows 2026 site:wikipedia.org",
 };
 
 /**
@@ -46,24 +46,60 @@ async function fetchWikiEntity(name) {
 }
 
 /**
- * Extract entity names from DeSearch web results snippets.
- * Looks for capitalized proper nouns and known name patterns.
+ * Use Chutes to extract real entity names from search result text.
+ * Returns an array of name strings.
  */
-function extractNamesFromResults(results) {
-  const names = new Set();
-  for (const r of results) {
-    const text = `${r.title || ""} ${r.snippet || ""}`;
-    // Match capitalized names (2-4 words, each starting with uppercase)
-    const matches = text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2}\b/g) || [];
-    for (const m of matches) {
-      // Filter out common non-entity words
-      const skip = /^(The|This|These|That|Those|Top|Best|Most|New|Get|See|How|Why|What|Our|More|From|With|About|After|Over|Just|Has|Was|Are|Were|Can|Will|May|For|But|And|Not|All|Some|Any|Each|Every|First|Last|Next|Here|Also|Even|Back|Into|Only|Than|Then|Both|Like|Make|Made|Find|Many|Much|Such|Very|Your|They|Their|Them|Been|Being|Have|Having|Does|Doing|Would|Could|Should|Might|Must|Shall|Need|Used|Use|Using|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)$/;
-      if (m.length > 3 && !skip.test(m.split(" ")[0])) {
-        names.add(m);
-      }
+async function extractNamesWithAI(results, category) {
+  if (!CHUTES_KEY) return [];
+
+  const snippets = results
+    .slice(0, 8)
+    .map((r) => `${r.title || ""}: ${r.snippet || ""}`)
+    .join("\n");
+
+  try {
+    const res = await fetch(CHUTES_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${CHUTES_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-ai/DeepSeek-V3.2-TEE",
+        messages: [
+          {
+            role: "system",
+            content: "Extract real, specific entity names from search results. Only include names of actual people, places, foods, movies, cars, or animals that have their own Wikipedia page. No generic terms.",
+          },
+          {
+            role: "user",
+            content: `Category: ${category}\n\nSearch results:\n${snippets}\n\nReturn ONLY a JSON array of 8-12 specific entity names. Example: ["Caitlin Clark", "Patrick Mahomes"]. No descriptions, no commentary.`,
+          },
+        ],
+        max_tokens: 200,
+        temperature: 0.3,
+      }),
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) return [];
+
+    const match = content.match(/\[[\s\S]*?\]/);
+    if (!match) return [];
+
+    try {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) return parsed.filter((n) => typeof n === "string" && n.length > 2);
+    } catch {
+      return [];
     }
+    return [];
+  } catch {
+    return [];
   }
-  return [...names];
 }
 
 /**
@@ -87,12 +123,13 @@ async function fetchCategoryFromDesearch(category, count = 8) {
     const results = data.data || data.results || [];
     if (!results.length) return [];
 
-    // Extract entity names from search results
-    const names = extractNamesFromResults(results);
+    // Use AI to extract clean entity names
+    const names = await extractNamesWithAI(results, category);
+    if (!names.length) return [];
 
-    // Try to resolve each name via Wikipedia (gets image + clean description)
+    // Resolve each name via Wikipedia (gets image + clean description)
     const resolved = await Promise.allSettled(
-      names.slice(0, count * 2).map((name) => fetchWikiEntity(name))
+      names.slice(0, count + 4).map((name) => fetchWikiEntity(name))
     );
 
     return resolved
