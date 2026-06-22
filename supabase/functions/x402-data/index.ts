@@ -104,7 +104,13 @@ async function chutesInfer(
     if (!content) return null;
 
     const jsonMatch = content.match(/[\[{][\s\S]*[\]}]/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {
+        return null;
+      }
+    }
     return null;
   } catch {
     return null;
@@ -144,8 +150,8 @@ Deno.serve(async (req) => {
     });
 
   try {
-    // --- Rankings ---
-    if (endpoint === "rankings") {
+    // --- Rankings (GET) ---
+    if (endpoint === "rankings" && isGet) {
       const price = PRICES.rankings;
       if (!verifyPayment(req, price)) {
         return paymentRequired(price, "Full ranked list of all items");
@@ -159,8 +165,8 @@ Deno.serve(async (req) => {
       return json({ items: items ?? [], count: items?.length ?? 0 });
     }
 
-    // --- Campaign results ---
-    if (endpoint === "campaign" && param) {
+    // --- Campaign results (GET) ---
+    if (endpoint === "campaign" && param && isGet) {
       const price = PRICES.campaign;
       if (!verifyPayment(req, price)) {
         return paymentRequired(price, `Campaign results for ${param}`);
@@ -210,8 +216,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- Taste profile (cross-category correlations) ---
-    if (endpoint === "taste-profile") {
+    // --- Taste profile (GET) ---
+    if (endpoint === "taste-profile" && isGet) {
       const price = PRICES["taste-profile"];
       if (!verifyPayment(req, price)) {
         return paymentRequired(price, "Cross-category taste correlations");
@@ -246,8 +252,8 @@ Deno.serve(async (req) => {
       return json({ correlations: matrix, total_cross_votes: votes?.length ?? 0 });
     }
 
-    // --- Head-to-head compare ---
-    if (endpoint === "compare") {
+    // --- Head-to-head compare (GET) ---
+    if (endpoint === "compare" && isGet) {
       const price = PRICES.compare;
       if (!verifyPayment(req, price)) {
         return paymentRequired(price, "Head-to-head comparison stats");
@@ -395,6 +401,7 @@ Return JSON array: [{"name": "exact name", "desc": "2-4 word description"}]`
 
     return json({ error: "Unknown endpoint", available: Object.keys(PRICES) }, 404);
   } catch (err) {
+    console.error("x402-data error:", err);
     return json({ error: "Internal error" }, 500);
   }
 });

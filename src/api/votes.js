@@ -42,40 +42,40 @@ export async function submitVote({
 
     // Credit earnings if campaign vote with sufficient quality
     if (campaignId && qualityScore >= QUALITY_THRESHOLD) {
-      // Fetch campaign payout rate
-      const { data: campaign } = await supabase
-        .from("campaigns")
-        .select("payout_per_vote, budget_usdc, spent_usdc")
-        .eq("id", campaignId)
-        .single();
+      // Atomic increment of campaign spent via RPC to prevent race conditions
+      const { data: result, error } = await supabase.rpc("try_campaign_payout", {
+        p_campaign_id: campaignId,
+        p_user_id: userId || null,
+      });
 
-      if (campaign && campaign.spent_usdc + campaign.payout_per_vote <= campaign.budget_usdc) {
-        const amount = Number(campaign.payout_per_vote);
-
-        // Update campaign spent
-        await supabase
+      // Fallback: direct read + guarded update if RPC doesn't exist yet
+      if (error) {
+        const { data: campaign } = await supabase
           .from("campaigns")
-          .update({ spent_usdc: campaign.spent_usdc + amount })
-          .eq("id", campaignId);
+          .select("payout_per_vote, budget_usdc, spent_usdc")
+          .eq("id", campaignId)
+          .single();
 
-        // Update user earnings
-        if (userId) {
-          await supabase.rpc("increment_earnings", {
-            p_user_id: userId,
+        if (campaign && campaign.spent_usdc + campaign.payout_per_vote <= campaign.budget_usdc) {
+          const amount = Number(campaign.payout_per_vote);
+
+          // Use atomic increment to avoid race condition
+          await supabase.rpc("increment_campaign_spent", {
+            p_campaign_id: campaignId,
             p_amount: amount,
           }).catch(() => {
-            // Fallback: direct update
+            // Last resort: direct update (still has race window but better than nothing)
             supabase
-              .from("users")
-              .update({
-                total_earned_usdc: campaign.spent_usdc + amount, // Will be handled by RPC ideally
-                vote_count: 0, // Placeholder
-              })
-              .eq("id", userId);
+              .from("campaigns")
+              .update({ spent_usdc: campaign.spent_usdc + amount })
+              .eq("id", campaignId)
+              .lte("spent_usdc", campaign.budget_usdc - amount);
           });
-        }
 
-        return { earned: true, amount };
+          return { earned: true, amount };
+        }
+      } else if (result && result.amount > 0) {
+        return { earned: true, amount: result.amount };
       }
     }
 

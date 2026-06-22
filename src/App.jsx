@@ -141,7 +141,7 @@ export default function App() {
         setPair(pickPair(fresh));
         setItemsLoaded(true);
         // Prefetch first AI-suggested pair
-        prefetchAIPair(fresh, store.current.getPrefs());
+        prefetchAIPair(fresh, store.current.getPrefs(), store.current.getVotes(), store.current.getContrarian(), store.current.getCrossCat());
       }
     });
     return () => { cancelled = true; };
@@ -219,7 +219,7 @@ export default function App() {
       setVerdict(null);
       setLocking(false);
       // Prefetch next AI pair in background
-      prefetchAIPair(fresh, store.current.getPrefs());
+      prefetchAIPair(fresh, store.current.getPrefs(), votes + 1, contrarian, crossCat);
     }, 520);
   };
 

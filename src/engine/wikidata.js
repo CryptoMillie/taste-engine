@@ -80,21 +80,6 @@ async function runQuery(sparql) {
   return data.results?.bindings ?? [];
 }
 
-function toCommonsThumb(url, width = 640) {
-  // Convert Wikidata commons file URL to a thumbnail
-  if (!url) return null;
-  const match = url.match(/Special:FilePath\/(.+)/);
-  if (!match) return url;
-  const file = decodeURIComponent(match[1]);
-  return `https://upload.wikimedia.org/wikipedia/commons/thumb/${commonsHash(file)}/${file}/${width}px-${file}`;
-}
-
-function commonsHash(filename) {
-  // Wikimedia uses MD5 hash for file paths — but we can use the direct URL instead
-  // Just return the image URL as-is from Wikidata
-  return "";
-}
-
 /**
  * Fetch items from Wikidata for a given category.
  * @param {string} category - One of: athletes, musicians, cars, animals, foods, movies, cities

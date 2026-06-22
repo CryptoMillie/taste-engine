@@ -73,7 +73,12 @@ async function fetchCategoryFromDesearch(category, count = 8) {
     const jsonMatch = summary.match(/\[[\s\S]*?\]/);
     if (!jsonMatch) return [];
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      return [];
+    }
     if (!Array.isArray(parsed)) return [];
 
     // Enrich with Wikipedia images in parallel

@@ -40,7 +40,13 @@ async function infer(systemPrompt, userPrompt, jsonMode = true) {
 
     if (jsonMode) {
       const jsonMatch = content.match(/[\[{][\s\S]*[\]}]/);
-      if (jsonMatch) return JSON.parse(jsonMatch[0]);
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch {
+          return null;
+        }
+      }
       return null;
     }
 

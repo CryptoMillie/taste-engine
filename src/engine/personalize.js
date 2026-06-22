@@ -43,13 +43,13 @@ export function updatePrefs(prefs, winner, loser) {
  * Prefetch an AI-suggested pair in the background.
  * Call after each vote so the next AI pick is ready instantly.
  */
-export function prefetchAIPair(items, prefs) {
+export function prefetchAIPair(items, prefs, votes = 0, contrarian = 0, crossCat = 0) {
   if (_aiFetching || !items.length) return;
   _aiFetching = true;
 
   const catStats = getCategoryStats(items);
-  const cRate = 0; // approximate, not critical for suggestion
-  const xRate = 0;
+  const cRate = votes > 0 ? contrarian / votes : 0;
+  const xRate = votes > 0 ? crossCat / votes : 0;
   const { topPick } = getTopAndRarest(items);
 
   const profile = {
