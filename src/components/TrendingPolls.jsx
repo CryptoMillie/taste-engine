@@ -13,18 +13,27 @@ function getVotedPolls() {
   }
 }
 
-function ResultBar({ poll, pickedId }) {
-  const [pctA, setPctA] = useState(null);
+function ResultBar({ poll, pickedId, savedPctA }) {
+  const [pctA, setPctA] = useState(savedPctA ?? null);
 
   useEffect(() => {
     fetchHeadToHead(poll.itemA.id, poll.itemB.id).then((h2h) => {
+      let pct;
       if (h2h && h2h.total > 0) {
-        setPctA(Math.round((h2h.aWins / h2h.total) * 100));
+        pct = Math.round((h2h.aWins / h2h.total) * 100);
       } else {
-        // No server data — show 50/50 as placeholder
-        setPctA(pickedId === poll.itemA.id ? 100 : 0);
+        pct = pickedId === poll.itemA.id ? 100 : 0;
       }
-    });
+      setPctA(pct);
+      // Save to localStorage
+      try {
+        const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
+        if (voted[poll.id]) {
+          voted[poll.id].pctA = pct;
+          localStorage.setItem(VOTED_KEY, JSON.stringify(voted));
+        }
+      } catch { /* ignore */ }
+    }).catch(() => {});
   }, [poll, pickedId]);
 
   if (pctA === null) return null;
@@ -214,7 +223,7 @@ function PollCard({ poll, voteData, onSelect }) {
         >
           {poll.label}
         </div>
-        {isVoted && <ResultBar poll={poll} pickedId={voteData.pickedId} />}
+        {isVoted && <ResultBar poll={poll} pickedId={voteData.pickedId} savedPctA={voteData.pctA} />}
       </div>
     </button>
   );

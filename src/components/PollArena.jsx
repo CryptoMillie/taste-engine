@@ -14,6 +14,16 @@ function getVotedPolls() {
   }
 }
 
+function savePollResult(pollId, pctA) {
+  try {
+    const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
+    if (voted[pollId]) {
+      voted[pollId].pctA = pctA;
+      localStorage.setItem(VOTED_KEY, JSON.stringify(voted));
+    }
+  } catch { /* ignore */ }
+}
+
 function ResultBar({ nameA, nameB, pctA }) {
   const pctB = 100 - pctA;
   const aWins = pctA >= pctB;
@@ -169,20 +179,29 @@ export default function PollArena({ poll, onVote, onBack }) {
       ? (existingVote.pickedId === poll.itemA.id ? poll.itemB : poll.itemA)
       : null
   );
-  const [resultPctA, setResultPctA] = useState(null);
+  const [resultPctA, setResultPctA] = useState(() => {
+    // Restore saved percentage if available
+    if (alreadyVoted && existingVote.pctA != null) return existingVote.pctA;
+    return null;
+  });
 
   const { itemA, itemB } = poll;
 
   const loadResults = (pickedId) => {
     fetchHeadToHead(itemA.id, itemB.id).then((h2h) => {
+      let pct;
       if (h2h && h2h.total > 0) {
-        setResultPctA(Math.round((h2h.aWins / h2h.total) * 100));
+        pct = Math.round((h2h.aWins / h2h.total) * 100);
       } else {
         // No server data — show your vote as 100%
-        setResultPctA(pickedId === itemA.id ? 100 : 0);
+        pct = pickedId === itemA.id ? 100 : 0;
       }
+      setResultPctA(pct);
+      savePollResult(poll.id, pct);
     }).catch(() => {
-      setResultPctA(pickedId === itemA.id ? 100 : 0);
+      const pct = pickedId === itemA.id ? 100 : 0;
+      setResultPctA(pct);
+      savePollResult(poll.id, pct);
     });
   };
 

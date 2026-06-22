@@ -7,7 +7,7 @@
 import { suggestPair } from "../api/chutes";
 import { getCategoryStats, getArchetype, getTopAndRarest } from "./taste-profile";
 
-const RECENCY_LIMIT = 20;
+const RECENCY_LIMIT = 50;
 const MIN_CATEGORIES_FOR_PERSONALIZATION = 3;
 const FLOOR_WEIGHT = 0.1;
 
@@ -177,13 +177,19 @@ function pickPersonalizedPair(items, prefs) {
   if (catItems.length === 0) return null;
   const a = catItems[(Math.random() * catItems.length) | 0];
 
-  // Pick rival B by closest Elo from ANY category (cross-pollination)
-  const rivals = pool
-    .filter((i) => i.id !== a.id)
-    .sort((x, y) => Math.abs(x.rating - a.rating) - Math.abs(y.rating - a.rating));
+  // Pick rival B — mix of Elo-close and random to avoid clustering
+  const rivals = pool.filter((i) => i.id !== a.id);
   if (rivals.length === 0) return null;
-  const bPool = rivals.slice(0, Math.max(2, Math.ceil(rivals.length * 0.3)));
-  const b = bPool[(Math.random() * bPool.length) | 0];
+
+  // 50% chance: pick from Elo-close rivals, 50%: pick any rival
+  let b;
+  if (Math.random() < 0.5) {
+    const sorted = [...rivals].sort((x, y) => Math.abs(x.rating - a.rating) - Math.abs(y.rating - a.rating));
+    const bPool = sorted.slice(0, Math.max(3, Math.ceil(sorted.length * 0.5)));
+    b = bPool[(Math.random() * bPool.length) | 0];
+  } else {
+    b = rivals[(Math.random() * rivals.length) | 0];
+  }
   return Math.random() < 0.5 ? [a, b] : [b, a];
 }
 
@@ -191,13 +197,19 @@ function pickDiscovery(items, prefs) {
   const pool = filterRecent(items, prefs.recentIds);
   const c = (i) => i.comparisons;
   const byCov = [...pool].sort((a, b) => c(a) - c(b));
-  const aPool = byCov.slice(0, Math.max(3, Math.ceil(pool.length * 0.4)));
+  // Widen the pick pool — take bottom 60% by coverage
+  const aPool = byCov.slice(0, Math.max(5, Math.ceil(pool.length * 0.6)));
   const a = aPool[(Math.random() * aPool.length) | 0];
 
-  const rivals = pool
-    .filter((i) => i.id !== a.id)
-    .sort((x, y) => Math.abs(x.rating - a.rating) - Math.abs(y.rating - a.rating));
-  const bPool = rivals.slice(0, Math.max(2, Math.ceil(rivals.length * 0.3)));
-  const b = bPool[(Math.random() * bPool.length) | 0];
+  const rivals = pool.filter((i) => i.id !== a.id);
+  // 50/50 Elo-close vs random rival
+  let b;
+  if (Math.random() < 0.5) {
+    const sorted = [...rivals].sort((x, y) => Math.abs(x.rating - a.rating) - Math.abs(y.rating - a.rating));
+    const bPool = sorted.slice(0, Math.max(3, Math.ceil(sorted.length * 0.5)));
+    b = bPool[(Math.random() * bPool.length) | 0];
+  } else {
+    b = rivals[(Math.random() * rivals.length) | 0];
+  }
   return Math.random() < 0.5 ? [a, b] : [b, a];
 }

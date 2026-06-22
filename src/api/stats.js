@@ -60,6 +60,7 @@ export function computeTasteTwinPercent(userStats, globalStats) {
 
 /**
  * Fetch head-to-head vote data between two items.
+ * Uses direct query instead of RPC for reliability.
  * @param {string} itemA — item ID
  * @param {string} itemB — item ID
  * @returns {{ aWins: number, bWins: number, total: number }|null}
@@ -68,20 +69,25 @@ export async function fetchHeadToHead(itemA, itemB) {
   if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase.rpc("get_head_to_head", {
-      p_item_a: itemA,
-      p_item_b: itemB,
-    });
+    // Query votes where these two items faced each other
+    const { data, error } = await supabase
+      .from("votes")
+      .select("winner_id")
+      .or(
+        `and(winner_id.eq.${itemA},loser_id.eq.${itemB}),and(winner_id.eq.${itemB},loser_id.eq.${itemA})`
+      );
 
     if (error || !data) return null;
 
-    return {
-      aWins: data.a_wins ?? 0,
-      bWins: data.b_wins ?? 0,
-      total: data.total ?? 0,
-    };
+    let aWins = 0;
+    let bWins = 0;
+    for (const v of data) {
+      if (v.winner_id === itemA) aWins++;
+      else bWins++;
+    }
+
+    return { aWins, bWins, total: data.length };
   } catch {
-    // RPC not deployed — graceful fallback
     return null;
   }
 }
