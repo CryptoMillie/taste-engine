@@ -5,6 +5,7 @@ import { SEED_ITEMS } from "../data/seeds";
 import { emptyPrefs, updatePrefs } from "./personalize";
 
 const STORAGE_KEY = "taste-engine-state";
+const STREAK_KEY = "taste-engine-streak";
 const BASE = 1200;
 
 const expected = (ra, rb) => 1 / (1 + Math.pow(10, (rb - ra) / 400));
@@ -119,6 +120,47 @@ export function createStore(initialItems) {
       localStorage.removeItem(STORAGE_KEY);
     },
   };
+}
+
+/** Streak tracking — separate from main state so resets don't kill streaks. */
+export function getStreak() {
+  try {
+    const raw = localStorage.getItem(STREAK_KEY);
+    if (!raw) return { current: 0, best: 0, lastVoteDate: null };
+    return JSON.parse(raw);
+  } catch {
+    return { current: 0, best: 0, lastVoteDate: null };
+  }
+}
+
+export function updateStreak() {
+  const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  const streak = getStreak();
+
+  if (streak.lastVoteDate === today) {
+    // Already voted today — no change
+    return { ...streak, isNew: false };
+  }
+
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  let next;
+
+  if (streak.lastVoteDate === yesterday) {
+    // Consecutive day — increment
+    next = streak.current + 1;
+  } else {
+    // Streak broken (or first vote ever) — start at 1
+    next = 1;
+  }
+
+  const best = Math.max(next, streak.best);
+  const updated = { current: next, best, lastVoteDate: today };
+
+  try {
+    localStorage.setItem(STREAK_KEY, JSON.stringify(updated));
+  } catch { /* storage full */ }
+
+  return { ...updated, isNew: true };
 }
 
 export function pickPair(items) {

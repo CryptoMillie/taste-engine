@@ -100,16 +100,22 @@ function ChallengeCard({ item, onClick, isWinner, isLoser, showResult }) {
   );
 }
 
-export default function Challenge({ itemA, itemB, onEnterApp, onVote }) {
+export default function Challenge({ itemA, itemB, onEnterApp, onVote, challengerPick }) {
   const [voted, setVoted] = useState(false);
   const [winner, setWinner] = useState(null);
   const [loser, setLoser] = useState(null);
   const [h2hLabel, setH2hLabel] = useState(null);
+  const [matchResult, setMatchResult] = useState(null); // "agree" | "disagree" | null
 
   const handlePick = (picked, other) => {
     setWinner(picked);
     setLoser(other);
     setVoted(true);
+
+    // Check agree/disagree with challenger
+    if (challengerPick) {
+      setMatchResult(picked.id === challengerPick ? "agree" : "disagree");
+    }
 
     // Register the vote locally
     if (onVote) onVote(picked, other);
@@ -191,7 +197,7 @@ export default function Challenge({ itemA, itemB, onEnterApp, onVote }) {
               marginBottom: 10,
             }}
           >
-            SOMEONE CHALLENGED YOU
+            {challengerPick ? "YOUR FRIEND MADE THEIR PICK" : "SOMEONE CHALLENGED YOU"}
           </div>
           <h1
             className="disp"
@@ -206,17 +212,44 @@ export default function Challenge({ itemA, itemB, onEnterApp, onVote }) {
           </h1>
         </>
       ) : (
-        <div
-          className="mono"
-          style={{
-            fontSize: 11,
-            letterSpacing: "0.18em",
-            color: T.soft,
-            marginBottom: 16,
-          }}
-        >
-          YOUR VERDICT
-        </div>
+        <>
+          {matchResult && (
+            <div
+              style={{
+                textAlign: "center",
+                marginBottom: 16,
+                animation: "rise .3s ease both",
+              }}
+            >
+              <div style={{ fontSize: 48, marginBottom: 4 }}>
+                {matchResult === "agree" ? "\u{1F91D}" : "\u{1F624}"}
+              </div>
+              <div
+                className="disp"
+                style={{
+                  fontSize: "clamp(22px, 4vw, 32px)",
+                  fontWeight: 800,
+                  color: matchResult === "agree" ? "#22c55e" : T.pop,
+                }}
+              >
+                {matchResult === "agree" ? "You agree!" : "You disagree!"}
+              </div>
+            </div>
+          )}
+          {!matchResult && (
+            <div
+              className="mono"
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.18em",
+                color: T.soft,
+                marginBottom: 16,
+              }}
+            >
+              YOUR VERDICT
+            </div>
+          )}
+        </>
       )}
 
       <div

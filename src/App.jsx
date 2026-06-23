@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp } from "lucide-react";
-import { createStore, pickPair } from "./engine/store";
+import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp, Zap } from "lucide-react";
+import { createStore, pickPair, getStreak, updateStreak } from "./engine/store";
 import { loadAllItems } from "./engine/items";
 import { pickPairWithCampaigns } from "./engine/pairing";
 import { pickPairPersonalized, prefetchAIPair } from "./engine/personalize";
@@ -20,6 +20,7 @@ import Challenge from "./components/Challenge";
 import MatchupShare from "./components/MatchupShare";
 import TrendingPolls from "./components/TrendingPolls";
 import PollArena from "./components/PollArena";
+import SpeedRound from "./components/SpeedRound";
 import { POLLS } from "./data/polls";
 
 function Stat({ label, value, color }) {
@@ -89,15 +90,18 @@ function isPollVoted(pollId) {
 }
 
 /**
- * Parse challenge IDs from URL query string.
- * Format: ?challenge=itemId1,itemId2
+ * Parse challenge IDs and optional challenger pick from URL query string.
+ * Format: ?challenge=itemId1,itemId2&pick=itemId1
  */
 function parseChallengeFromURL() {
   const params = new URLSearchParams(window.location.search);
   const challenge = params.get("challenge");
   if (!challenge) return null;
   const ids = challenge.split(",").map((s) => s.trim()).filter(Boolean);
-  if (ids.length === 2) return ids;
+  if (ids.length === 2) {
+    const pick = params.get("pick") || null;
+    return { ids, challengerPick: pick };
+  }
   return null;
 }
 
@@ -115,7 +119,8 @@ export default function App() {
   const [activeCampaignId, setActiveCampaignId] = useState(null);
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [lastPair, setLastPair] = useState(null);
-  const [challengeIds, setChallengeIds] = useState(() => parseChallengeFromURL());
+  const [streak, setStreak] = useState(() => getStreak());
+  const [challengeData, setChallengeData] = useState(() => parseChallengeFromURL());
   const [activePoll, setActivePoll] = useState(() => {
     const poll = parsePollFromURL();
     if (poll) {
@@ -179,6 +184,18 @@ export default function App() {
       setCrossCat((c) => c + 1);
     }
 
+    // Update daily streak
+    const streakResult = updateStreak();
+    if (streakResult.isNew) {
+      setStreak(streakResult);
+      const s = streakResult.current;
+      if (s === 3) setFlash("3-day streak! Keep it going.");
+      else if (s === 7) setFlash("7-day streak! You're on fire.");
+      else if (s === 14) setFlash("14-day streak! Unstoppable.");
+      else if (s === 30) setFlash("30-day streak! Legend status.");
+      else if (s === 100) setFlash("100-day streak! Absolute machine.");
+    }
+
     // Save last pair for challenge link
     setLastPair([winner, loser]);
 
@@ -238,7 +255,7 @@ export default function App() {
 
   const copyChallenge = () => {
     if (!lastPair) return;
-    const url = `${window.location.origin}${window.location.pathname}?challenge=${lastPair[0].id},${lastPair[1].id}`;
+    const url = `${window.location.origin}${window.location.pathname}?challenge=${lastPair[0].id},${lastPair[1].id}&pick=${lastPair[0].id}`;
     navigator.clipboard.writeText(url).then(() => {
       setFlash("Challenge link copied!");
     }).catch(() => {
@@ -247,7 +264,7 @@ export default function App() {
   };
 
   const handleEnterApp = () => {
-    setChallengeIds(null);
+    setChallengeData(null);
     // Clean URL without reload
     window.history.replaceState({}, "", window.location.pathname);
   };
@@ -306,9 +323,9 @@ export default function App() {
           : "Mainstream";
 
   // Challenge mode — takes priority over all views
-  if (challengeIds) {
-    const challengeItemA = items.find((i) => i.id === challengeIds[0]);
-    const challengeItemB = items.find((i) => i.id === challengeIds[1]);
+  if (challengeData) {
+    const challengeItemA = items.find((i) => i.id === challengeData.ids[0]);
+    const challengeItemB = items.find((i) => i.id === challengeData.ids[1]);
 
     // If items aren't loaded yet and we're still loading, show spinner
     if (!itemsLoaded && !challengeItemA && !challengeItemB) {
@@ -335,6 +352,7 @@ export default function App() {
       <Challenge
         itemA={challengeItemA}
         itemB={challengeItemB}
+        challengerPick={challengeData.challengerPick}
         onEnterApp={handleEnterApp}
         onVote={(winner, loser) => {
           store.current.vote(winner.id, loser.id);
@@ -382,6 +400,9 @@ export default function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Stat label="VERDICTS" value={votes} color={T.ink} />
+          {streak.current > 0 && (
+            <Stat label="STREAK" value={`\u{1F525} ${streak.current}`} color={streak.current >= 7 ? T.pop : T.ink} />
+          )}
           <Stat
             label="YOUR TASTE"
             value={tasteLabel}
@@ -400,6 +421,16 @@ export default function App() {
                 <Sparkles size={16} />
               </button>
             )}
+            <button
+              onClick={() => setView(view === "speedRound" ? "arena" : "speedRound")}
+              style={{
+                ...btnStyle,
+                background: view === "speedRound" ? T.pop : T.ink,
+              }}
+              title="Speed Round"
+            >
+              <Zap size={16} /> <span className="header-label">Speed</span>
+            </button>
             <button
               onClick={() => {
                 if (view === "polls" || view === "pollArena") {
@@ -506,6 +537,17 @@ export default function App() {
         <TrendingPolls polls={POLLS} onSelectPoll={handleSelectPoll} />
       ) : view === "pollArena" && activePoll ? (
         <PollArena poll={activePoll} onVote={handlePollVote} onBack={handlePollBack} />
+      ) : view === "speedRound" ? (
+        <SpeedRound
+          items={items}
+          store={store}
+          onComplete={(results) => {
+            setVotes(store.current.getVotes());
+            setItems(store.current.getItems());
+            setView("arena");
+          }}
+          onBack={() => setView("arena")}
+        />
       ) : view === "profile" ? (
         <Profile userId={userId} votes={votes} />
       ) : (
