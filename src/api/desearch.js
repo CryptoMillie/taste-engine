@@ -6,7 +6,7 @@
  * clean entity names, then Wikipedia for images.
  */
 
-const DESEARCH_URL = "https://api.desearch.ai/web";
+const DESEARCH_URL = "https://api.desearch.ai/api/v1/search/web";
 const DESEARCH_KEY = import.meta.env.VITE_DESEARCH_API_KEY;
 const CHUTES_URL = "https://chutes-deepseek-ai-deepseek-v3-2-tee.chutes.ai/v1/chat/completions";
 const CHUTES_KEY = import.meta.env.VITE_CHUTES_API_KEY;
@@ -54,7 +54,7 @@ async function extractNamesWithAI(results, category) {
 
   const snippets = results
     .slice(0, 8)
-    .map((r) => `${r.title || ""}: ${r.snippet || ""}`)
+    .map((r) => `${r.title || ""}: ${r.snippet || r.description || ""}`)
     .join("\n");
 
   try {
@@ -113,14 +113,29 @@ async function fetchCategoryFromDesearch(category, count = 8) {
 
   try {
     const url = `${DESEARCH_URL}?query=${encodeURIComponent(query)}&num=15`;
-    const res = await fetch(url, {
-      headers: { Authorization: DESEARCH_KEY },
+    let res = await fetch(url, {
+      headers: { Authorization: `Bearer ${DESEARCH_KEY}` },
     });
+
+    // Fallback: try without Bearer prefix
+    if (res.status === 401 || res.status === 403) {
+      res = await fetch(url, {
+        headers: { Authorization: DESEARCH_KEY },
+      });
+    }
+
+    // Fallback: try old /web endpoint
+    if (!res.ok) {
+      const fallbackUrl = `https://api.desearch.ai/web?query=${encodeURIComponent(query)}&num=15`;
+      res = await fetch(fallbackUrl, {
+        headers: { Authorization: DESEARCH_KEY },
+      });
+    }
 
     if (!res.ok) return [];
 
     const data = await res.json();
-    const results = data.data || data.results || [];
+    const results = data.data || data.results || data.organic_results || data.web?.results || [];
     if (!results.length) return [];
 
     // Use AI to extract clean entity names

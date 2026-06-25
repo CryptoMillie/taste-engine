@@ -60,18 +60,39 @@ async function syncToSupabase(items) {
 }
 
 /**
- * Load all items: seeds + trending + Wikidata.
+ * Fetch server-side trending items that were refreshed by the daily cron.
+ * These are stored in Supabase by the refresh-trending edge function.
+ */
+async function fetchServerTrending() {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from("items")
+      .select("id, name, sub, cat, img, rating, comparisons, wins")
+      .like("id", "ds_%")
+      .order("id");
+    if (error || !data) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Load all items: seeds + trending + Wikidata + DeSearch + server trending.
  * Returns items ready for the store.
  */
 export async function loadAllItems() {
   let all = [...SEED_ITEMS];
 
-  // Fetch trending, Wikidata, and DeSearch in parallel, non-blocking
-  const [trendingResult, wikidataResult, desearchResult] = await Promise.allSettled([
-    fetchTrending(20),
-    fetchAllCategories(),
-    fetchTrendingFromDesearch(),
-  ]);
+  // Fetch all sources in parallel, non-blocking
+  const [trendingResult, wikidataResult, desearchResult, serverResult] =
+    await Promise.allSettled([
+      fetchTrending(20),
+      fetchAllCategories(),
+      fetchTrendingFromDesearch(),
+      fetchServerTrending(),
+    ]);
 
   if (trendingResult.status === "fulfilled" && trendingResult.value.length) {
     all = [...all, ...trendingResult.value];
@@ -83,6 +104,12 @@ export async function loadAllItems() {
 
   if (desearchResult.status === "fulfilled" && desearchResult.value.length) {
     all = [...all, ...desearchResult.value];
+  }
+
+  // Server-side trending acts as a fallback — always merge these in
+  // so even if client-side DeSearch fails, we have fresh items from the daily cron
+  if (serverResult.status === "fulfilled" && serverResult.value.length) {
+    all = [...all, ...serverResult.value];
   }
 
   const unique = dedup(all);
