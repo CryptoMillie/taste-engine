@@ -275,36 +275,44 @@ Deno.serve(async (req) => {
   });
 
   // Upsert into items table with stable IDs
-  const rows = unique.map((item, i) => ({
+  // Uses RPC to preserve existing rating/comparisons/wins for items that already exist
+  const rows = unique.map((item) => ({
     id: `ds_${item.cat}_${item.name.toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 40)}`,
     name: item.name,
     sub: item.sub,
     cat: item.cat,
     img: item.img,
-    rating: 1200,
-    comparisons: 0,
-    wins: 0,
-    source: "desearch",
-    refreshed_at: new Date().toISOString(),
   }));
 
-  const { error: upsertError } = await supabase
-    .from("items")
-    .upsert(rows, {
-      onConflict: "id",
-      // Don't overwrite rating/comparisons/wins for existing items
-      ignoreDuplicates: false,
+  let upsertErrors = 0;
+  for (const row of rows) {
+    const { error } = await supabase.rpc("upsert_trending_item", {
+      p_id: row.id,
+      p_name: row.name,
+      p_sub: row.sub || "",
+      p_cat: row.cat,
+      p_img: row.img || "",
     });
+    if (error) {
+      console.error(`RPC upsert failed for ${row.id}:`, error.message);
+      upsertErrors++;
+    }
+  }
 
-  if (upsertError) {
-    console.error("Supabase upsert error:", upsertError);
-
-    // If source/refreshed_at columns don't exist yet, try without them
-    const fallbackRows = rows.map(({ source, refreshed_at, ...rest }) => rest);
+  if (upsertErrors === rows.length && rows.length > 0) {
+    // All RPC calls failed — fall back to bulk upsert (without rating/comparisons/wins)
+    console.warn("All RPC upserts failed, trying bulk insert with ignoreDuplicates...");
+    const fallbackRows = rows.map((r) => ({
+      ...r,
+      rating: 1200,
+      comparisons: 0,
+      wins: 0,
+      source: "desearch",
+      refreshed_at: new Date().toISOString(),
+    }));
     const { error: fallbackError } = await supabase
       .from("items")
-      .upsert(fallbackRows, { onConflict: "id" });
-
+      .upsert(fallbackRows, { onConflict: "id", ignoreDuplicates: true });
     if (fallbackError) {
       console.error("Fallback upsert also failed:", fallbackError);
       return new Response(

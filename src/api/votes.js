@@ -4,6 +4,19 @@
  */
 import { supabase } from "./supabase";
 import { QUALITY_THRESHOLD } from "./quality";
+import { awardCoins } from "./coins";
+
+// Coin economy rates
+const BASE_COINS = 10;
+const STREAK_BONUS = { 3: 2, 7: 5, 14: 10 };
+const SPEED_ROUND_BONUS = 3;
+
+function getStreakBonus(streakDays) {
+  if (streakDays >= 14) return STREAK_BONUS[14];
+  if (streakDays >= 7) return STREAK_BONUS[7];
+  if (streakDays >= 3) return STREAK_BONUS[3];
+  return 0;
+}
 
 /**
  * @param {Object} params
@@ -14,7 +27,9 @@ import { QUALITY_THRESHOLD } from "./quality";
  * @param {number} params.qualityScore - Quality score 0-1
  * @param {number} params.timeTakenMs - Time taken in ms
  * @param {string} params.sessionId - Session identifier
- * @returns {Promise<{earned: boolean, amount: number}>}
+ * @param {number} [params.streakDays] - Current streak length
+ * @param {boolean} [params.isSpeedRound] - Whether this is a speed round vote
+ * @returns {Promise<{earned: boolean, amount: number, coinsEarned: number}>}
  */
 export async function submitVote({
   userId,
@@ -24,8 +39,10 @@ export async function submitVote({
   qualityScore,
   timeTakenMs,
   sessionId,
+  streakDays = 0,
+  isSpeedRound = false,
 }) {
-  if (!supabase) return { earned: false, amount: 0 };
+  if (!supabase) return { earned: false, amount: 0, coinsEarned: 0 };
 
   try {
     // Insert vote
@@ -39,6 +56,9 @@ export async function submitVote({
       session_id: sessionId,
       source: "human",
     });
+
+    let usdEarned = false;
+    let usdAmount = 0;
 
     // Credit earnings if campaign vote with sufficient quality
     if (campaignId && qualityScore >= QUALITY_THRESHOLD) {
@@ -57,30 +77,57 @@ export async function submitVote({
           .single();
 
         if (campaign && campaign.spent_usdc + campaign.payout_per_vote <= campaign.budget_usdc) {
-          const amount = Number(campaign.payout_per_vote);
+          usdAmount = Number(campaign.payout_per_vote);
+          usdEarned = true;
 
-          // Use atomic increment to avoid race condition
           await supabase.rpc("increment_campaign_spent", {
             p_campaign_id: campaignId,
-            p_amount: amount,
+            p_amount: usdAmount,
           }).catch(() => {
-            // Last resort: direct update (still has race window but better than nothing)
             supabase
               .from("campaigns")
-              .update({ spent_usdc: campaign.spent_usdc + amount })
+              .update({ spent_usdc: campaign.spent_usdc + usdAmount })
               .eq("id", campaignId)
-              .lte("spent_usdc", campaign.budget_usdc - amount);
+              .lte("spent_usdc", campaign.budget_usdc - usdAmount);
           });
-
-          return { earned: true, amount };
         }
       } else if (result && result.amount > 0) {
-        return { earned: true, amount: result.amount };
+        usdEarned = true;
+        usdAmount = result.amount;
       }
     }
 
-    return { earned: false, amount: 0 };
+    // Award Taste Coins if quality is sufficient
+    let coinsEarned = 0;
+    if (userId && qualityScore >= QUALITY_THRESHOLD) {
+      coinsEarned = BASE_COINS + getStreakBonus(streakDays);
+      if (isSpeedRound) coinsEarned += SPEED_ROUND_BONUS;
+      awardCoins(userId, coinsEarned, "vote", `${winnerId}_vs_${loserId}`).catch(() => {});
+    }
+
+    // Increment market votes if an open market exists for this pair
+    try {
+      const orderedA = winnerId < loserId ? winnerId : loserId;
+      const orderedB = winnerId < loserId ? loserId : winnerId;
+      const { data: market } = await supabase
+        .from("matchup_markets")
+        .select("id, item_a")
+        .eq("item_a", orderedA)
+        .eq("item_b", orderedB)
+        .eq("status", "open")
+        .single();
+
+      if (market) {
+        const forA = winnerId === market.item_a;
+        await supabase.rpc("increment_market_votes", {
+          p_market_id: market.id,
+          p_for_a: forA,
+        });
+      }
+    } catch { /* no open market — fine */ }
+
+    return { earned: usdEarned, amount: usdAmount, coinsEarned };
   } catch {
-    return { earned: false, amount: 0 };
+    return { earned: false, amount: 0, coinsEarned: 0 };
   }
 }

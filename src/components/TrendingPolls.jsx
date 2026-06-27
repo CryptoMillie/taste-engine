@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { T } from "../theme";
 import { POLL_CATEGORIES } from "../data/polls";
 import { fetchHeadToHead } from "../api/stats";
+import { fetchLiveTrending } from "../api/trending";
 
 const VOTED_KEY = "taste-polls-voted";
 
@@ -11,6 +12,17 @@ function getVotedPolls() {
   } catch {
     return {};
   }
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return "";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const hours = Math.floor(diff / 3600000);
+  if (hours < 1) return "just now";
+  if (hours === 1) return "1 hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function ResultBar({ poll, pickedId, savedPctA }) {
@@ -25,7 +37,6 @@ function ResultBar({ poll, pickedId, savedPctA }) {
         pct = pickedId === poll.itemA.id ? 100 : 0;
       }
       setPctA(pct);
-      // Save to localStorage
       try {
         const voted = JSON.parse(localStorage.getItem(VOTED_KEY) || "{}");
         if (voted[poll.id]) {
@@ -229,14 +240,163 @@ function PollCard({ poll, voteData, onSelect }) {
   );
 }
 
+function LiveMatchupCard({ matchup, onSelect }) {
+  return (
+    <button
+      onClick={() => onSelect(matchup)}
+      style={{
+        background: T.card,
+        border: `1.5px solid #d9770633`,
+        borderRadius: 18,
+        padding: 0,
+        cursor: "pointer",
+        overflow: "hidden",
+        textAlign: "left",
+        width: "100%",
+        position: "relative",
+        minWidth: 280,
+      }}
+    >
+      <div style={{ display: "flex", height: 140 }}>
+        <div
+          style={{
+            flex: 1,
+            backgroundImage: matchup.itemA.img ? `url("${matchup.itemA.img}")` : "none",
+            backgroundSize: "cover",
+            backgroundPosition: "center top",
+            position: "relative",
+            backgroundColor: "#cfcabd",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.6) 100%)",
+            }}
+          />
+          <div
+            className="disp"
+            style={{
+              position: "absolute",
+              bottom: 8,
+              left: 10,
+              right: 4,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              textShadow: "0 1px 6px rgba(0,0,0,.6)",
+              lineHeight: 1.2,
+            }}
+          >
+            {matchup.itemA.name}
+          </div>
+        </div>
+        <div
+          className="disp"
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 58,
+            transform: "translate(-50%, -50%)",
+            background: "#d97706",
+            color: "#fff",
+            fontSize: 9,
+            fontWeight: 800,
+            padding: "3px 7px",
+            borderRadius: 99,
+            zIndex: 2,
+            letterSpacing: "0.05em",
+          }}
+        >
+          VS
+        </div>
+        <div
+          style={{
+            flex: 1,
+            backgroundImage: matchup.itemB.img ? `url("${matchup.itemB.img}")` : "none",
+            backgroundSize: "cover",
+            backgroundPosition: "center top",
+            position: "relative",
+            backgroundColor: "#cfcabd",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.6) 100%)",
+            }}
+          />
+          <div
+            className="disp"
+            style={{
+              position: "absolute",
+              bottom: 8,
+              right: 10,
+              left: 4,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              textShadow: "0 1px 6px rgba(0,0,0,.6)",
+              textAlign: "right",
+              lineHeight: 1.2,
+            }}
+          >
+            {matchup.itemB.name}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "10px 14px" }}>
+        <span
+          className="mono"
+          style={{
+            fontSize: 9,
+            letterSpacing: "0.14em",
+            color: "#d97706",
+            background: "#d9770614",
+            padding: "3px 8px",
+            borderRadius: 99,
+            fontWeight: 600,
+          }}
+        >
+          {matchup.category.toUpperCase()}
+        </span>
+      </div>
+    </button>
+  );
+}
+
 export default function TrendingPolls({ polls, onSelectPoll }) {
   const [activeCategory, setActiveCategory] = useState("All");
+  const [liveMatchups, setLiveMatchups] = useState([]);
+  const [liveLoading, setLiveLoading] = useState(true);
   const votedPolls = getVotedPolls();
+
+  useEffect(() => {
+    fetchLiveTrending()
+      .then(setLiveMatchups)
+      .finally(() => setLiveLoading(false));
+  }, []);
 
   const filtered =
     activeCategory === "All"
       ? polls
       : polls.filter((p) => p.category === activeCategory);
+
+  const handleLiveSelect = (matchup) => {
+    // Convert live matchup to poll-like object for PollArena
+    const poll = {
+      id: matchup.id,
+      itemA: matchup.itemA,
+      itemB: matchup.itemB,
+      category: matchup.category,
+      label: `${matchup.itemA.name} vs ${matchup.itemB.name}`,
+    };
+    onSelectPoll(poll);
+  };
+
+  const latestRefresh = liveMatchups[0]?.refreshedAt;
 
   return (
     <div
@@ -269,6 +429,45 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
       >
         TAP A POLL TO CAST YOUR VOTE
       </p>
+
+      {/* Live Trending Section */}
+      {!liveLoading && liveMatchups.length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14 }}>
+            <div
+              className="mono"
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.14em",
+                color: "#d97706",
+                fontWeight: 700,
+              }}
+            >
+              LIVE TRENDING
+            </div>
+            {latestRefresh && (
+              <span style={{ fontSize: 11, color: T.soft }}>
+                Updated {timeAgo(latestRefresh)}
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {liveMatchups.map((matchup) => (
+              <LiveMatchupCard
+                key={matchup.id}
+                matchup={matchup}
+                onSelect={handleLiveSelect}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Category filter pills */}
       <div

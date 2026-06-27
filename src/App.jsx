@@ -9,6 +9,7 @@ import { submitVote } from "./api/votes";
 import { useSession } from "./hooks/useSession";
 import { useCampaigns } from "./hooks/useCampaigns";
 import { useAuth } from "./hooks/useAuth";
+import { useCoins } from "./hooks/useCoins";
 import { T } from "./theme";
 import Arena from "./components/Arena";
 import Rankings from "./components/Rankings";
@@ -21,6 +22,7 @@ import MatchupShare from "./components/MatchupShare";
 import TrendingPolls from "./components/TrendingPolls";
 import PollArena from "./components/PollArena";
 import SpeedRound from "./components/SpeedRound";
+import StakePanel from "./components/StakePanel";
 import { POLLS } from "./data/polls";
 
 function Stat({ label, value, color }) {
@@ -132,7 +134,9 @@ export default function App() {
 
   const { sessionId, markPairShown, recordPick } = useSession();
   const { campaigns } = useCampaigns();
-  const { userId } = useAuth();
+  const { userId, authProvider, userMeta, signInWithGoogle, signInWithTwitter, signOut } = useAuth();
+  const { balance: coinBalance, lifetimeEarned: coinLifetime, refresh: refreshCoins, addOptimistic: addCoinsOptimistic } = useCoins(userId);
+  const [hasStaked, setHasStaked] = useState(false);
 
   // Load expanded items on mount
   useEffect(() => {
@@ -212,9 +216,13 @@ export default function App() {
       qualityScore,
       timeTakenMs: pickData.timeTakenMs,
       sessionId,
-    }).then(({ earned, amount }) => {
+      streakDays: streak.current || 0,
+    }).then(({ earned, amount, coinsEarned }) => {
       if (earned) {
         setFlash(`+$${amount.toFixed(2)} earned!`);
+      } else if (coinsEarned > 0) {
+        addCoinsOptimistic(coinsEarned);
+        setFlash(`+${coinsEarned} coins!`);
       }
     });
 
@@ -235,6 +243,7 @@ export default function App() {
       nextPair(fresh);
       setVerdict(null);
       setLocking(false);
+      setHasStaked(false);
       // Prefetch next AI pair in background
       prefetchAIPair(fresh, store.current.getPrefs(), votes + 1, contrarian, crossCat);
     }, 520);
@@ -400,6 +409,9 @@ export default function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Stat label="VERDICTS" value={votes} color={T.ink} />
+          {coinBalance > 0 && (
+            <Stat label="COINS" value={coinBalance} color="#d97706" />
+          )}
           {streak.current > 0 && (
             <Stat label="STREAK" value={`\u{1F525} ${streak.current}`} color={streak.current >= 7 ? T.pop : T.ink} />
           )}
@@ -509,6 +521,17 @@ export default function App() {
             Which do you <span style={{ color: T.pop }}>prefer</span>?
           </h1>
           <CampaignBanner campaign={activeCampaign} />
+          <StakePanel
+            pair={pair}
+            coinBalance={coinBalance}
+            hasStaked={hasStaked}
+            userId={userId}
+            onStake={(amount) => {
+              addCoinsOptimistic(-amount);
+              setHasStaked(true);
+              setFlash(`Staked ${amount} coins!`);
+            }}
+          />
           <Arena
             pair={pair}
             verdict={verdict}
@@ -541,15 +564,30 @@ export default function App() {
         <SpeedRound
           items={items}
           store={store}
+          userId={userId}
+          sessionId={sessionId}
+          streakDays={streak.current || 0}
+          onCoinsEarned={(amount) => addCoinsOptimistic(amount)}
           onComplete={(results) => {
             setVotes(store.current.getVotes());
             setItems(store.current.getItems());
+            refreshCoins();
             setView("arena");
           }}
           onBack={() => setView("arena")}
         />
       ) : view === "profile" ? (
-        <Profile userId={userId} votes={votes} />
+        <Profile
+          userId={userId}
+          votes={votes}
+          coinBalance={coinBalance}
+          coinLifetime={coinLifetime}
+          authProvider={authProvider}
+          userMeta={userMeta}
+          onSignInGoogle={signInWithGoogle}
+          onSignInTwitter={signInWithTwitter}
+          onSignOut={signOut}
+        />
       ) : (
         <Rankings ranked={ranked} />
       )}

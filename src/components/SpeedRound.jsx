@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import { T } from "../theme";
 import { pickPair } from "../engine/store";
+import { submitVote } from "../api/votes";
 import { socialBtnStyle } from "./MatchupShare";
 
 const ROUND_DURATION = 60; // seconds
 const MAX_VOTES = 20;
 
-export default function SpeedRound({ items, store, onComplete, onBack }) {
+export default function SpeedRound({ items, store, onComplete, onBack, userId, sessionId, streakDays = 0, onCoinsEarned }) {
   const [pair, setPair] = useState(() => pickPair(items));
   const [timeLeft, setTimeLeft] = useState(ROUND_DURATION);
   const [votesInRound, setVotesInRound] = useState(0);
@@ -40,6 +41,22 @@ export default function SpeedRound({ items, store, onComplete, onBack }) {
 
     store.current.vote(winner.id, loser.id);
     setVerdict({ winnerId: winner.id });
+
+    // Background sync with speed round bonus
+    submitVote({
+      userId,
+      winnerId: winner.id,
+      loserId: loser.id,
+      qualityScore: 0.8,
+      timeTakenMs: elapsed,
+      sessionId,
+      streakDays,
+      isSpeedRound: true,
+    }).then(({ coinsEarned }) => {
+      if (coinsEarned > 0 && onCoinsEarned) {
+        onCoinsEarned(coinsEarned);
+      }
+    });
 
     const newCount = votesInRound + 1;
     setVotesInRound(newCount);
