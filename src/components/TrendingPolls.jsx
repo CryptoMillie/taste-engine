@@ -26,7 +26,8 @@ function timeAgo(dateStr) {
 }
 
 function ResultBar({ poll, pickedId, savedPctA }) {
-  const [pctA, setPctA] = useState(savedPctA ?? null);
+  const fallback = pickedId === poll.itemA.id ? 100 : 0;
+  const [pctA, setPctA] = useState(savedPctA ?? fallback);
 
   useEffect(() => {
     fetchHeadToHead(poll.itemA.id, poll.itemB.id).then((h2h) => {
@@ -34,7 +35,7 @@ function ResultBar({ poll, pickedId, savedPctA }) {
       if (h2h && h2h.total > 0) {
         pct = Math.round((h2h.aWins / h2h.total) * 100);
       } else {
-        pct = pickedId === poll.itemA.id ? 100 : 0;
+        pct = fallback;
       }
       setPctA(pct);
       try {
@@ -44,8 +45,8 @@ function ResultBar({ poll, pickedId, savedPctA }) {
           localStorage.setItem(VOTED_KEY, JSON.stringify(voted));
         }
       } catch { /* ignore */ }
-    }).catch(() => {});
-  }, [poll, pickedId]);
+    }).catch(() => setPctA(fallback));
+  }, [poll, pickedId, fallback]);
 
   if (pctA === null) return null;
   const pctB = 100 - pctA;
