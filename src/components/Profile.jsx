@@ -457,6 +457,31 @@ export default function Profile({
 
       {/* Payout */}
       <div style={sectionStyle}>
+        {earnings >= 1 && walletAddress && !payoutRequested && (
+          <div style={{
+            fontSize: 12, marginBottom: 12, padding: "10px 14px",
+            background: T.paper, borderRadius: 10,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+              <span style={{ color: T.soft }}>Gross</span>
+              <span>${earnings.toFixed(2)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+              <span style={{ color: T.soft }}>Fee (10%)</span>
+              <span style={{ color: T.pop }}>-${(earnings * 0.10).toFixed(2)}</span>
+            </div>
+            <div style={{
+              display: "flex", justifyContent: "space-between",
+              fontWeight: 600, borderTop: `1px solid ${T.line}`, paddingTop: 3,
+            }}>
+              <span>You receive</span>
+              <span style={{ color: "#16a34a" }}>${(earnings * 0.90).toFixed(2)} USDC</span>
+            </div>
+            <div style={{ fontSize: 11, color: T.soft, marginTop: 4 }}>
+              Sent to your wallet on Base
+            </div>
+          </div>
+        )}
         <button
           onClick={handleRequestPayout}
           disabled={earnings < 1 || !walletAddress || payoutRequested}
@@ -473,12 +498,12 @@ export default function Profile({
           }}
         >
           {payoutRequested
-            ? "Payout Requested"
+            ? "Payout Requested — Processing on Base"
             : earnings < 1
               ? "Minimum $1.00 to withdraw"
               : !walletAddress
                 ? "Connect wallet first"
-                : `Request Payout — $${earnings.toFixed(2)}`}
+                : `Withdraw $${(earnings * 0.90).toFixed(2)} USDC`}
         </button>
       </div>
     </main>

@@ -277,11 +277,30 @@ export default function ComputeDashboard({
         </div>
         {totalUsdc > 0 && (
           <div style={{
-            marginTop: 14, padding: "10px 14px",
+            marginTop: 14, padding: "12px 14px",
             background: T.paper, borderRadius: 10,
-            fontSize: 12, color: T.soft,
+            fontSize: 12,
           }}>
-            20% platform fee on USDC withdrawals. Taste Coins are fee-free.
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ color: T.soft }}>Gross earned</span>
+              <span style={{ fontWeight: 600 }}>${totalUsdc.toFixed(4)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ color: T.soft }}>Platform fee (10%)</span>
+              <span style={{ color: T.pop }}>-${(totalUsdc * 0.10).toFixed(4)}</span>
+            </div>
+            <div style={{
+              display: "flex", justifyContent: "space-between",
+              borderTop: `1px solid ${T.line}`, paddingTop: 4,
+            }}>
+              <span style={{ fontWeight: 600 }}>You receive</span>
+              <span style={{ fontWeight: 700, color: "#16a34a" }}>
+                ${(totalUsdc * 0.90).toFixed(4)}
+              </span>
+            </div>
+            <div style={{ color: T.soft, marginTop: 6, fontSize: 11 }}>
+              Paid in USDC on Base. Taste Coins are fee-free.
+            </div>
           </div>
         )}
       </div>
