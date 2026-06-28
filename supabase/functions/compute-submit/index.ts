@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  const { job_type, payload, coins_reward = 10, max_duration_ms = 30000 } = body;
+  const { job_type, payload, coins_reward = 10, usdc_reward = 0.0005, max_duration_ms = 30000 } = body;
 
   if (!job_type || !payload) {
     return new Response(
@@ -125,6 +125,7 @@ Deno.serve(async (req) => {
       payload_encrypted: payloadEncrypted,
       payload_hash: payloadHash,
       coins_reward,
+      usdc_reward,
       max_duration_ms,
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     })

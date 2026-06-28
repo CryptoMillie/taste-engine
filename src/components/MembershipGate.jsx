@@ -9,7 +9,7 @@ const sectionStyle = {
   marginBottom: 16,
 };
 
-export default function MembershipGate({ membership }) {
+export default function MembershipGate({ membership, earningsRate }) {
   if (!membership) return null;
 
   const now = Date.now();
@@ -20,8 +20,9 @@ export default function MembershipGate({ membership }) {
   const dailyUsed = membership.daily_jobs_used || 0;
   const limitReached = !isPremium && !trialActive && dailyUsed >= dailyLimit;
 
-  // Hours remaining in trial
-  const hoursLeft = trialActive ? Math.max(0, Math.ceil((trialEnd - now) / (60 * 60 * 1000))) : 0;
+  const hoursLeft = trialActive
+    ? Math.max(0, Math.ceil((trialEnd - now) / (60 * 60 * 1000)))
+    : 0;
 
   return (
     <div style={sectionStyle}>
@@ -29,25 +30,27 @@ export default function MembershipGate({ membership }) {
         className="mono"
         style={{ fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10 }}
       >
-        MEMBERSHIP
+        PLAN
       </div>
 
       {isPremium ? (
         <div>
-          <div style={{ fontWeight: 600, fontSize: 15, color: "#d97706" }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: "#16a34a" }}>
             Premium
           </div>
           <div style={{ fontSize: 13, color: T.soft, marginTop: 4 }}>
-            Unlimited jobs. USD earnings enabled.
+            Unlimited jobs. Full USDC + Taste Coin earnings.
           </div>
         </div>
       ) : trialActive ? (
         <div>
           <div style={{ fontWeight: 600, fontSize: 15, color: "#d97706" }}>
-            Premium Trial
+            Premium Trial — {hoursLeft}h left
           </div>
           <div style={{ fontSize: 13, color: T.soft, marginTop: 4 }}>
-            {hoursLeft} hours remaining. Unlimited jobs during trial.
+            Unlimited earnings during trial. Earn up to ${earningsRate
+              ? (earningsRate.usdcPerHour * hoursLeft).toFixed(2)
+              : "?"} USDC if you leave it running.
           </div>
         </div>
       ) : limitReached ? (
@@ -56,43 +59,45 @@ export default function MembershipGate({ membership }) {
             Daily Limit Reached
           </div>
           <div style={{ fontSize: 13, color: T.soft, marginTop: 4 }}>
-            {dailyUsed}/{dailyLimit} jobs today. Come back tomorrow or upgrade.
+            {dailyUsed}/{dailyLimit} jobs today. Upgrade to keep earning.
           </div>
           <button
             style={{
               marginTop: 12,
-              background: "#d97706",
+              background: "#16a34a",
               color: "#fff",
               border: "none",
-              padding: "10px 20px",
+              padding: "12px 20px",
               borderRadius: 12,
               fontSize: 14,
               fontWeight: 600,
               cursor: "pointer",
+              width: "100%",
             }}
           >
-            Upgrade to Premium
+            Upgrade to Premium — Unlimited Earnings
           </button>
         </div>
       ) : (
         <div>
           <div style={{ fontWeight: 600, fontSize: 15 }}>
-            Free Tier
+            Free — {dailyUsed}/{dailyLimit} jobs today
           </div>
           <div style={{ fontSize: 13, color: T.soft, marginTop: 4 }}>
-            {dailyUsed}/{dailyLimit} jobs today. Upgrade for unlimited.
+            Upgrade for unlimited jobs and higher USDC payouts.
           </div>
           <button
             style={{
               marginTop: 12,
-              background: "#d97706",
+              background: "#16a34a",
               color: "#fff",
               border: "none",
-              padding: "10px 20px",
+              padding: "12px 20px",
               borderRadius: 12,
               fontSize: 14,
               fontWeight: 600,
               cursor: "pointer",
+              width: "100%",
             }}
           >
             Upgrade to Premium

@@ -528,6 +528,7 @@ create table if not exists compute_workers (
   last_heartbeat timestamptz default now(),
   total_jobs integer not null default 0,
   total_coins_earned integer not null default 0,
+  total_usdc_earned numeric(12,6) not null default 0,
   created_at timestamptz default now(),
   constraint compute_workers_user_device unique (user_id, device_id_hash)
 );
@@ -547,6 +548,7 @@ create table if not exists compute_jobs (
   result_encrypted text,
   result_hash text,
   coins_reward integer not null default 10,
+  usdc_reward numeric(12,6) not null default 0.0005,
   max_duration_ms integer not null default 30000,
   expires_at timestamptz default now() + interval '10 minutes',
   created_at timestamptz default now(),
@@ -683,7 +685,7 @@ create or replace function complete_compute_job(
   p_worker_id uuid,
   p_result_encrypted text,
   p_result_hash text
-) returns integer as $$
+) returns jsonb as $$
 declare
   v_job record;
   v_user_id uuid;
@@ -715,14 +717,23 @@ begin
   -- Award coins via existing RPC
   v_new_balance := award_coins(v_user_id, v_job.coins_reward, 'compute_job', p_job_id::text);
 
+  -- Credit USDC to user
+  update users
+  set total_earned_usdc = total_earned_usdc + v_job.usdc_reward
+  where id = v_user_id;
+
   -- Update worker stats
   update compute_workers
   set status = 'idle',
       total_jobs = total_jobs + 1,
-      total_coins_earned = total_coins_earned + v_job.coins_reward
+      total_coins_earned = total_coins_earned + v_job.coins_reward,
+      total_usdc_earned = total_usdc_earned + v_job.usdc_reward
   where id = p_worker_id;
 
-  return v_job.coins_reward;
+  return jsonb_build_object(
+    'coins', v_job.coins_reward,
+    'usdc', v_job.usdc_reward
+  );
 end;
 $$ language plpgsql security definer;
 

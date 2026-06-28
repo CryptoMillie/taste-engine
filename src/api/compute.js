@@ -15,7 +15,7 @@ async function hashId(raw) {
 }
 
 /** Classify GPU renderer into a generic tier (never store raw string). */
-function classifyGpu(renderer) {
+export function classifyGpu(renderer) {
   const r = (renderer || "").toLowerCase();
   if (/4090|4080|3090|a100|h100|rx\s*7900/i.test(r)) return "high";
   if (/4070|3080|3070|rx\s*7800|rx\s*6[89]00/i.test(r)) return "mid";
@@ -23,6 +23,17 @@ function classifyGpu(renderer) {
   if (r) return "low";
   return "unknown";
 }
+
+/**
+ * USDC earnings rate per hour by GPU class.
+ * These are the rates workers see — platform takes 20% from buyers on top.
+ */
+export const EARNINGS_RATES = {
+  high:    { usdcPerHour: 0.25, coinsPerHour: 80 },
+  mid:     { usdcPerHour: 0.15, coinsPerHour: 60 },
+  low:     { usdcPerHour: 0.08, coinsPerHour: 40 },
+  unknown: { usdcPerHour: 0.10, coinsPerHour: 50 },
+};
 
 /** Register or update a compute worker for this device. */
 export async function registerWorker(userId, deviceId, gpuInfo) {
@@ -87,7 +98,7 @@ export async function fetchJobPayload(jobId) {
   try {
     const { data } = await supabase
       .from("compute_jobs")
-      .select("id, job_type, payload_encrypted, payload_hash, coins_reward, max_duration_ms")
+      .select("id, job_type, payload_encrypted, payload_hash, coins_reward, usdc_reward, max_duration_ms")
       .eq("id", jobId)
       .single();
     return data;
@@ -96,9 +107,9 @@ export async function fetchJobPayload(jobId) {
   }
 }
 
-/** Submit job result via RPC. Returns coins earned. */
+/** Submit job result via RPC. Returns { coins, usdc }. */
 export async function submitJobResult(jobId, workerId, resultEncrypted, resultHash) {
-  if (!supabase || !jobId || !workerId) return 0;
+  if (!supabase || !jobId || !workerId) return { coins: 0, usdc: 0 };
   try {
     const { data, error } = await supabase.rpc("complete_compute_job", {
       p_job_id: jobId,
@@ -108,11 +119,11 @@ export async function submitJobResult(jobId, workerId, resultEncrypted, resultHa
     });
     if (error) {
       console.error("submitJobResult error:", error.message);
-      return 0;
+      return { coins: 0, usdc: 0 };
     }
-    return data; // coins_reward
+    return data || { coins: 0, usdc: 0 };
   } catch {
-    return 0;
+    return { coins: 0, usdc: 0 };
   }
 }
 
@@ -133,7 +144,7 @@ export async function fetchWorkerStats(userId) {
   try {
     const { data } = await supabase
       .from("compute_workers")
-      .select("id, gpu_class, status, total_jobs, total_coins_earned")
+      .select("id, gpu_class, status, total_jobs, total_coins_earned, total_usdc_earned")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)

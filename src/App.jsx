@@ -479,11 +479,11 @@ export default function App() {
               onClick={() => setView(view === "compute" ? "arena" : "compute")}
               style={{
                 ...btnStyle,
-                background: view === "compute" ? T.pop : T.ink,
+                background: view === "compute" ? "#16a34a" : T.ink,
               }}
-              title="GPU Compute"
+              title="Earn with GPU"
             >
-              <Cpu size={16} />
+              <Cpu size={16} /> <span className="header-label">Earn</span>
             </button>
             <button
               onClick={() => setView(view === "profile" ? "arena" : "profile")}
@@ -593,14 +593,19 @@ export default function App() {
         <ComputeDashboard
           gpuAvailable={compute.gpuAvailable}
           gpuInfo={compute.gpuInfo}
+          gpuClass={compute.gpuClass}
           enabled={compute.enabled}
           toggle={compute.toggle}
+          starting={compute.starting}
           status={compute.status}
           currentJob={compute.currentJob}
           jobsThisSession={compute.jobsThisSession}
           coinsThisSession={compute.coinsThisSession}
+          usdcThisSession={compute.usdcThisSession}
           workerStats={compute.workerStats}
           membership={compute.membership}
+          sessionElapsed={compute.sessionElapsed}
+          earningsRate={compute.earningsRate}
         />
       ) : view === "profile" ? (
         <Profile

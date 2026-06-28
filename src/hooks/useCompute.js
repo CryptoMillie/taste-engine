@@ -9,36 +9,44 @@ import {
   fetchWorkerStats,
   fetchMembership,
   initMembership,
+  classifyGpu,
+  EARNINGS_RATES,
 } from "../api/compute";
 
 /**
  * Hook for GPU compute worker lifecycle.
- *
- * Returns: { gpuAvailable, gpuInfo, enabled, toggle, status,
- *            currentJob, jobsThisSession, coinsThisSession,
- *            workerStats, membership, refreshStats }
+ * Tracks USDC + coins earnings, provides a live $/hr rate, and
+ * a session elapsed timer for projected earnings display.
  */
 export function useCompute(userId) {
   const [gpuAvailable, setGpuAvailable] = useState(false);
   const [gpuInfo, setGpuInfo] = useState({ vendor: "", renderer: "" });
+  const [gpuClass, setGpuClass] = useState("unknown");
   const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState("offline"); // offline | idle | busy
   const [currentJob, setCurrentJob] = useState(null);
   const [jobsThisSession, setJobsThisSession] = useState(0);
   const [coinsThisSession, setCoinsThisSession] = useState(0);
+  const [usdcThisSession, setUsdcThisSession] = useState(0);
   const [workerStats, setWorkerStats] = useState(null);
   const [membership, setMembership] = useState(null);
+  const [sessionElapsed, setSessionElapsed] = useState(0); // seconds
+  const [starting, setStarting] = useState(false);
 
   const workerIdRef = useRef(null);
   const gpuWorkerRef = useRef(null);
   const heartbeatRef = useRef(null);
   const pollRef = useRef(null);
+  const timerRef = useRef(null);
   const enabledRef = useRef(false);
+  const busyRef = useRef(false);
+  const sessionStartRef = useRef(null);
 
-  // Keep ref in sync
-  useEffect(() => {
-    enabledRef.current = enabled;
-  }, [enabled]);
+  // Keep refs in sync
+  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+
+  // Earnings rate for this GPU
+  const earningsRate = EARNINGS_RATES[gpuClass] || EARNINGS_RATES.unknown;
 
   // Detect WebGPU on mount
   useEffect(() => {
@@ -49,10 +57,10 @@ export function useCompute(userId) {
         if (!adapter) return;
         const info = await adapter.requestAdapterInfo?.() || {};
         setGpuAvailable(true);
-        setGpuInfo({
-          vendor: info.vendor || "Unknown",
-          renderer: info.description || info.device || "WebGPU Device",
-        });
+        const renderer = info.description || info.device || "WebGPU Device";
+        const vendor = info.vendor || "Unknown";
+        setGpuInfo({ vendor, renderer });
+        setGpuClass(classifyGpu(renderer));
         adapter.requestDevice().then((d) => d.destroy()).catch(() => {});
       } catch { /* no GPU */ }
     }
@@ -70,9 +78,7 @@ export function useCompute(userId) {
   }, [userId]);
 
   // Fetch stats on mount
-  useEffect(() => {
-    refreshStats();
-  }, [refreshStats]);
+  useEffect(() => { refreshStats(); }, [refreshStats]);
 
   // Execute a job via the Web Worker
   const executeJob = useCallback(
@@ -86,6 +92,7 @@ export function useCompute(userId) {
 
       setCurrentJob(job);
       setStatus("busy");
+      busyRef.current = true;
 
       gpuWorkerRef.current.onmessage = async (e) => {
         const msg = e.data;
@@ -97,14 +104,17 @@ export function useCompute(userId) {
             msg.resultHash
           );
           setJobsThisSession((j) => j + 1);
-          if (earned > 0) setCoinsThisSession((c) => c + earned);
+          if (earned.coins > 0) setCoinsThisSession((c) => c + earned.coins);
+          if (earned.usdc > 0) setUsdcThisSession((u) => u + Number(earned.usdc));
           setCurrentJob(null);
           setStatus("idle");
+          busyRef.current = false;
           refreshStats();
         } else if (msg.type === "error" && msg.jobId === job.id) {
           console.error("Compute job failed:", msg.error);
           setCurrentJob(null);
           setStatus("idle");
+          busyRef.current = false;
         }
       };
 
@@ -120,7 +130,7 @@ export function useCompute(userId) {
 
   // Poll for jobs
   const pollForJob = useCallback(async () => {
-    if (!enabledRef.current || !workerIdRef.current) return;
+    if (!enabledRef.current || !workerIdRef.current || busyRef.current) return;
 
     const jobId = await claimJob(workerIdRef.current);
     if (!jobId) return;
@@ -138,6 +148,7 @@ export function useCompute(userId) {
       setEnabled(false);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
       if (workerIdRef.current) {
         await updateWorkerStatus(workerIdRef.current, "offline");
       }
@@ -147,9 +158,12 @@ export function useCompute(userId) {
       }
       setStatus("offline");
       setCurrentJob(null);
+      busyRef.current = false;
+      sessionStartRef.current = null;
     } else {
       // Start
       if (!userId || !gpuAvailable) return;
+      setStarting(true);
 
       const deviceId =
         localStorage.getItem("taste-device-id") ||
@@ -157,7 +171,7 @@ export function useCompute(userId) {
       localStorage.setItem("taste-device-id", deviceId);
 
       const worker = await registerWorker(userId, deviceId, gpuInfo);
-      if (!worker) return;
+      if (!worker) { setStarting(false); return; }
 
       workerIdRef.current = worker.id;
       await initMembership(userId);
@@ -165,6 +179,16 @@ export function useCompute(userId) {
 
       setEnabled(true);
       setStatus("idle");
+      setStarting(false);
+      sessionStartRef.current = Date.now();
+      setSessionElapsed(0);
+
+      // Session timer — tick every second
+      timerRef.current = setInterval(() => {
+        if (sessionStartRef.current) {
+          setSessionElapsed(Math.floor((Date.now() - sessionStartRef.current) / 1000));
+        }
+      }, 1000);
 
       // Heartbeat every 30s
       heartbeatRef.current = setInterval(() => {
@@ -173,7 +197,7 @@ export function useCompute(userId) {
 
       // Poll for jobs every 5s
       pollRef.current = setInterval(() => {
-        if (enabledRef.current && !currentJob) {
+        if (enabledRef.current && !busyRef.current) {
           pollForJob();
         }
       }, 5000);
@@ -181,13 +205,14 @@ export function useCompute(userId) {
       // Immediate first poll
       pollForJob();
     }
-  }, [enabled, userId, gpuAvailable, gpuInfo, currentJob, pollForJob, refreshStats]);
+  }, [enabled, userId, gpuAvailable, gpuInfo, pollForJob, refreshStats]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
       if (gpuWorkerRef.current) gpuWorkerRef.current.terminate();
       if (workerIdRef.current) {
         updateWorkerStatus(workerIdRef.current, "offline");
@@ -198,14 +223,19 @@ export function useCompute(userId) {
   return {
     gpuAvailable,
     gpuInfo,
+    gpuClass,
     enabled,
     toggle,
+    starting,
     status,
     currentJob,
     jobsThisSession,
     coinsThisSession,
+    usdcThisSession,
     workerStats,
     membership,
+    sessionElapsed,
+    earningsRate,
     refreshStats,
   };
 }

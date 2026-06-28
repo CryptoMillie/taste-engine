@@ -288,27 +288,33 @@ export default function Profile({
         </div>
       )}
 
-      {/* GPU Compute */}
+      {/* GPU Compute Earnings */}
       {computeStats && computeStats.total_jobs > 0 && (
         <div style={sectionStyle}>
           <div
             className="mono"
             style={{ fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10 }}
           >
-            GPU COMPUTE
+            GPU COMPUTE EARNINGS
           </div>
           <div style={{ display: "flex", gap: 24 }}>
             <div>
-              <div className="disp" style={{ fontSize: 28, fontWeight: 700 }}>
-                {computeStats.total_jobs}
+              <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#16a34a" }}>
+                ${Number(computeStats.total_usdc_earned || 0).toFixed(4)}
               </div>
-              <div style={{ fontSize: 12, color: T.soft }}>Jobs completed</div>
+              <div style={{ fontSize: 12, color: T.soft }}>USDC earned</div>
             </div>
             <div>
               <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#d97706" }}>
                 {computeStats.total_coins_earned}
               </div>
-              <div style={{ fontSize: 12, color: T.soft }}>Coins from compute</div>
+              <div style={{ fontSize: 12, color: T.soft }}>Coins mined</div>
+            </div>
+            <div>
+              <div className="disp" style={{ fontSize: 28, fontWeight: 700 }}>
+                {computeStats.total_jobs}
+              </div>
+              <div style={{ fontSize: 12, color: T.soft }}>Jobs</div>
             </div>
           </div>
         </div>
