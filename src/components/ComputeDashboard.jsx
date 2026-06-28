@@ -26,6 +26,7 @@ export default function ComputeDashboard({
   enabled,
   toggle,
   starting,
+  error,
   status,
   currentJob,
   jobsThisSession,
@@ -154,9 +155,18 @@ export default function ComputeDashboard({
         >
           {starting ? "Connecting..." : enabled ? "Stop Earning" : "Start Earning"}
         </button>
-        {!enabled && !starting && (
+        {!enabled && !starting && !error && (
           <div style={{ fontSize: 12, color: T.soft, marginTop: 8 }}>
             Runs in the background while you browse. Stop anytime.
+          </div>
+        )}
+        {error && (
+          <div style={{
+            fontSize: 13, color: T.pop, marginTop: 10,
+            padding: "10px 14px", background: "#fff0ee",
+            borderRadius: 10, textAlign: "left",
+          }}>
+            {error}
           </div>
         )}
       </div>

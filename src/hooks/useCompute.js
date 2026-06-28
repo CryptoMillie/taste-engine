@@ -32,6 +32,7 @@ export function useCompute(userId) {
   const [membership, setMembership] = useState(null);
   const [sessionElapsed, setSessionElapsed] = useState(0); // seconds
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState(null);
 
   const workerIdRef = useRef(null);
   const gpuWorkerRef = useRef(null);
@@ -150,7 +151,7 @@ export function useCompute(userId) {
       if (pollRef.current) clearInterval(pollRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
       if (workerIdRef.current) {
-        await updateWorkerStatus(workerIdRef.current, "offline");
+        await updateWorkerStatus(workerIdRef.current, "offline").catch(() => {});
       }
       if (gpuWorkerRef.current) {
         gpuWorkerRef.current.terminate();
@@ -164,46 +165,72 @@ export function useCompute(userId) {
       // Start
       if (!userId || !gpuAvailable) return;
       setStarting(true);
+      setError(null);
 
-      const deviceId =
-        localStorage.getItem("taste-device-id") ||
-        crypto.randomUUID();
-      localStorage.setItem("taste-device-id", deviceId);
+      try {
+        const deviceId =
+          localStorage.getItem("taste-device-id") ||
+          crypto.randomUUID();
+        localStorage.setItem("taste-device-id", deviceId);
 
-      const worker = await registerWorker(userId, deviceId, gpuInfo);
-      if (!worker) { setStarting(false); return; }
+        // Race against a 10s timeout so we never stalemate
+        const worker = await Promise.race([
+          registerWorker(userId, deviceId, gpuInfo),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), 10000)
+          ),
+        ]);
 
-      workerIdRef.current = worker.id;
-      await initMembership(userId);
-      await refreshStats();
-
-      setEnabled(true);
-      setStatus("idle");
-      setStarting(false);
-      sessionStartRef.current = Date.now();
-      setSessionElapsed(0);
-
-      // Session timer — tick every second
-      timerRef.current = setInterval(() => {
-        if (sessionStartRef.current) {
-          setSessionElapsed(Math.floor((Date.now() - sessionStartRef.current) / 1000));
+        if (!worker) {
+          setError("Could not register — run the compute schema in Supabase SQL Editor first.");
+          setStarting(false);
+          return;
         }
-      }, 1000);
 
-      // Heartbeat every 30s
-      heartbeatRef.current = setInterval(() => {
-        if (workerIdRef.current) sendHeartbeat(workerIdRef.current);
-      }, 30000);
+        workerIdRef.current = worker.id;
 
-      // Poll for jobs every 5s
-      pollRef.current = setInterval(() => {
-        if (enabledRef.current && !busyRef.current) {
-          pollForJob();
-        }
-      }, 5000);
+        // These can fail silently — non-blocking
+        await Promise.race([
+          initMembership(userId),
+          new Promise((r) => setTimeout(r, 5000)),
+        ]).catch(() => {});
+        await refreshStats().catch(() => {});
 
-      // Immediate first poll
-      pollForJob();
+        setEnabled(true);
+        setStatus("idle");
+        setStarting(false);
+        sessionStartRef.current = Date.now();
+        setSessionElapsed(0);
+
+        // Session timer — tick every second
+        timerRef.current = setInterval(() => {
+          if (sessionStartRef.current) {
+            setSessionElapsed(Math.floor((Date.now() - sessionStartRef.current) / 1000));
+          }
+        }, 1000);
+
+        // Heartbeat every 30s
+        heartbeatRef.current = setInterval(() => {
+          if (workerIdRef.current) sendHeartbeat(workerIdRef.current);
+        }, 30000);
+
+        // Poll for jobs every 5s
+        pollRef.current = setInterval(() => {
+          if (enabledRef.current && !busyRef.current) {
+            pollForJob();
+          }
+        }, 5000);
+
+        // Immediate first poll
+        pollForJob();
+      } catch (err) {
+        const msg = err?.message === "timeout"
+          ? "Connection timed out. Check that compute tables exist in Supabase."
+          : "Failed to connect. Check console for details.";
+        console.error("Compute toggle error:", err);
+        setError(msg);
+        setStarting(false);
+      }
     }
   }, [enabled, userId, gpuAvailable, gpuInfo, pollForJob, refreshStats]);
 
@@ -227,6 +254,7 @@ export function useCompute(userId) {
     enabled,
     toggle,
     starting,
+    error,
     status,
     currentJob,
     jobsThisSession,

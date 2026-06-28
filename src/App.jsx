@@ -597,6 +597,7 @@ export default function App() {
           enabled={compute.enabled}
           toggle={compute.toggle}
           starting={compute.starting}
+          error={compute.error}
           status={compute.status}
           currentJob={compute.currentJob}
           jobsThisSession={compute.jobsThisSession}
