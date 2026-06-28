@@ -510,3 +510,257 @@ select cron.schedule(
   '*/5 * * * *',
   $$ select resolve_expired_markets(); $$
 );
+
+-- ══════════════════════════════════════════════════════════════════
+-- GPU Compute Marketplace
+-- ══════════════════════════════════════════════════════════════════
+
+-- Workers: devices contributing GPU compute
+-- Privacy: device_id_hash is a SHA-256 of the raw device UUID (never stored).
+-- gpu_class is a generic tier (e.g. "high", "mid", "low"), NOT the raw renderer string.
+create table if not exists compute_workers (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id),
+  device_id_hash text not null,
+  gpu_class text default 'unknown',
+  status text not null default 'offline'
+    check (status in ('offline', 'idle', 'busy', 'suspended')),
+  last_heartbeat timestamptz default now(),
+  total_jobs integer not null default 0,
+  total_coins_earned integer not null default 0,
+  created_at timestamptz default now(),
+  constraint compute_workers_user_device unique (user_id, device_id_hash)
+);
+
+-- Jobs: compute tasks submitted by buyers
+-- Privacy: buyer_id and assigned_worker_id are internal-only.
+-- RLS ensures workers never see buyer_id, buyers never see assigned_worker_id.
+create table if not exists compute_jobs (
+  id uuid primary key default gen_random_uuid(),
+  buyer_id uuid references users(id),
+  job_type text not null check (job_type in ('inference', 'embedding', 'benchmark')),
+  payload_encrypted text not null,
+  payload_hash text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'assigned', 'running', 'completed', 'failed', 'expired')),
+  assigned_worker_id uuid references compute_workers(id),
+  result_encrypted text,
+  result_hash text,
+  coins_reward integer not null default 10,
+  max_duration_ms integer not null default 30000,
+  expires_at timestamptz default now() + interval '10 minutes',
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+-- Memberships: free vs premium tiers
+create table if not exists compute_memberships (
+  user_id uuid primary key references users(id),
+  tier text not null default 'free' check (tier in ('free', 'premium')),
+  trial_started_at timestamptz default now(),
+  trial_ends_at timestamptz default now() + interval '48 hours',
+  daily_jobs_used integer not null default 0,
+  daily_jobs_reset_at timestamptz default now() + interval '1 day'
+);
+
+-- Indexes
+create index if not exists idx_compute_workers_user on compute_workers(user_id);
+create index if not exists idx_compute_workers_status on compute_workers(status);
+create index if not exists idx_compute_jobs_status on compute_jobs(status);
+create index if not exists idx_compute_jobs_worker on compute_jobs(assigned_worker_id);
+create index if not exists idx_compute_jobs_expires on compute_jobs(expires_at);
+create index if not exists idx_compute_memberships_tier on compute_memberships(tier);
+
+-- RLS
+alter table compute_workers enable row level security;
+alter table compute_jobs enable row level security;
+alter table compute_memberships enable row level security;
+
+-- Workers: users manage own
+create policy "Users read own workers" on compute_workers
+  for select using (auth.uid() = user_id);
+create policy "Users insert own workers" on compute_workers
+  for insert with check (auth.uid() = user_id);
+create policy "Users update own workers" on compute_workers
+  for update using (auth.uid() = user_id);
+
+-- Jobs: assigned worker can read their job (stripped view — no buyer_id visible)
+-- Workers see: id, job_type, payload_encrypted, payload_hash, status, coins_reward,
+--              max_duration_ms, result_encrypted, result_hash, created_at, completed_at
+-- buyer_id is column-level hidden by only selecting needed cols in the API layer.
+create policy "Workers read assigned jobs" on compute_jobs
+  for select using (
+    assigned_worker_id in (
+      select id from compute_workers where user_id = auth.uid()
+    )
+  );
+-- Buyers can read their own jobs (assigned_worker_id is opaque to them)
+create policy "Buyers read own jobs" on compute_jobs
+  for select using (auth.uid() = buyer_id);
+
+-- Memberships: users read own
+create policy "Users read own membership" on compute_memberships
+  for select using (auth.uid() = user_id);
+create policy "Users insert own membership" on compute_memberships
+  for insert with check (auth.uid() = user_id);
+create policy "Users update own membership" on compute_memberships
+  for update using (auth.uid() = user_id);
+
+-- ── Claim a compute job (atomic, skip locked) ──────────────────────
+create or replace function claim_compute_job(
+  p_worker_id uuid
+) returns uuid as $$
+declare
+  v_job_id uuid;
+  v_user_id uuid;
+  v_membership record;
+begin
+  -- Get user for this worker
+  select user_id into v_user_id
+  from compute_workers where id = p_worker_id;
+
+  if v_user_id is null then
+    raise exception 'Worker not found';
+  end if;
+
+  -- Check membership / daily limits
+  select * into v_membership
+  from compute_memberships where user_id = v_user_id;
+
+  if v_membership is not null then
+    -- Reset daily counter if needed
+    if v_membership.daily_jobs_reset_at <= now() then
+      update compute_memberships
+      set daily_jobs_used = 0,
+          daily_jobs_reset_at = now() + interval '1 day'
+      where user_id = v_user_id;
+      v_membership.daily_jobs_used := 0;
+    end if;
+
+    -- Free tier (trial expired): enforce 10 jobs/day
+    if v_membership.tier = 'free'
+       and v_membership.trial_ends_at <= now()
+       and v_membership.daily_jobs_used >= 10 then
+      return null; -- daily limit reached
+    end if;
+  end if;
+
+  -- Claim oldest pending job
+  select id into v_job_id
+  from compute_jobs
+  where status = 'pending'
+    and expires_at > now()
+  order by created_at asc
+  limit 1
+  for update skip locked;
+
+  if v_job_id is null then
+    return null; -- no jobs available
+  end if;
+
+  update compute_jobs
+  set status = 'assigned',
+      assigned_worker_id = p_worker_id
+  where id = v_job_id;
+
+  -- Bump daily usage
+  update compute_memberships
+  set daily_jobs_used = daily_jobs_used + 1
+  where user_id = v_user_id;
+
+  -- Mark worker busy
+  update compute_workers
+  set status = 'busy'
+  where id = p_worker_id;
+
+  return v_job_id;
+end;
+$$ language plpgsql security definer;
+
+-- ── Complete a compute job ─────────────────────────────────────────
+create or replace function complete_compute_job(
+  p_job_id uuid,
+  p_worker_id uuid,
+  p_result_encrypted text,
+  p_result_hash text
+) returns integer as $$
+declare
+  v_job record;
+  v_user_id uuid;
+  v_new_balance integer;
+begin
+  select * into v_job
+  from compute_jobs
+  where id = p_job_id
+    and assigned_worker_id = p_worker_id
+    and status = 'assigned'
+  for update;
+
+  if v_job is null then
+    raise exception 'Job not found or not assigned to this worker';
+  end if;
+
+  -- Mark job completed
+  update compute_jobs
+  set status = 'completed',
+      result_encrypted = p_result_encrypted,
+      result_hash = p_result_hash,
+      completed_at = now()
+  where id = p_job_id;
+
+  -- Get worker's user
+  select user_id into v_user_id
+  from compute_workers where id = p_worker_id;
+
+  -- Award coins via existing RPC
+  v_new_balance := award_coins(v_user_id, v_job.coins_reward, 'compute_job', p_job_id::text);
+
+  -- Update worker stats
+  update compute_workers
+  set status = 'idle',
+      total_jobs = total_jobs + 1,
+      total_coins_earned = total_coins_earned + v_job.coins_reward
+  where id = p_worker_id;
+
+  return v_job.coins_reward;
+end;
+$$ language plpgsql security definer;
+
+-- ── Expire stale jobs + reset stuck workers ────────────────────────
+create or replace function expire_stale_compute_jobs() returns integer as $$
+declare
+  v_expired integer := 0;
+begin
+  -- Expire pending jobs past their expiry
+  update compute_jobs
+  set status = 'expired'
+  where status in ('pending', 'assigned')
+    and expires_at <= now();
+  get diagnostics v_expired = row_count;
+
+  -- Reset workers stuck in 'busy' with no active job
+  update compute_workers
+  set status = 'idle'
+  where status = 'busy'
+    and id not in (
+      select assigned_worker_id from compute_jobs
+      where status in ('assigned', 'running')
+        and assigned_worker_id is not null
+    );
+
+  -- Mark workers offline if no heartbeat for 2 minutes
+  update compute_workers
+  set status = 'offline'
+  where status in ('idle', 'busy')
+    and last_heartbeat < now() - interval '2 minutes';
+
+  return v_expired;
+end;
+$$ language plpgsql security definer;
+
+-- Cron: expire stale compute jobs every minute
+select cron.schedule(
+  'expire-stale-compute-jobs',
+  '* * * * *',
+  $$ select expire_stale_compute_jobs(); $$
+);

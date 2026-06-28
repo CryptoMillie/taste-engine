@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp, Zap } from "lucide-react";
+import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp, Zap, Cpu } from "lucide-react";
 import { createStore, pickPair, getStreak, updateStreak } from "./engine/store";
 import { loadAllItems } from "./engine/items";
 import { pickPairWithCampaigns } from "./engine/pairing";
@@ -23,6 +23,8 @@ import TrendingPolls from "./components/TrendingPolls";
 import PollArena from "./components/PollArena";
 import SpeedRound from "./components/SpeedRound";
 import StakePanel from "./components/StakePanel";
+import ComputeDashboard from "./components/ComputeDashboard";
+import { useCompute } from "./hooks/useCompute";
 import { POLLS } from "./data/polls";
 
 function Stat({ label, value, color }) {
@@ -136,6 +138,7 @@ export default function App() {
   const { campaigns } = useCampaigns();
   const { userId, authProvider, userMeta, signInWithGoogle, signInWithTwitter, signOut } = useAuth();
   const { balance: coinBalance, lifetimeEarned: coinLifetime, refresh: refreshCoins, addOptimistic: addCoinsOptimistic } = useCoins(userId);
+  const compute = useCompute(userId);
   const [hasStaked, setHasStaked] = useState(false);
 
   // Load expanded items on mount
@@ -473,6 +476,16 @@ export default function App() {
               )}
             </button>
             <button
+              onClick={() => setView(view === "compute" ? "arena" : "compute")}
+              style={{
+                ...btnStyle,
+                background: view === "compute" ? T.pop : T.ink,
+              }}
+              title="GPU Compute"
+            >
+              <Cpu size={16} />
+            </button>
+            <button
               onClick={() => setView(view === "profile" ? "arena" : "profile")}
               style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
               title="Profile"
@@ -576,6 +589,19 @@ export default function App() {
           }}
           onBack={() => setView("arena")}
         />
+      ) : view === "compute" ? (
+        <ComputeDashboard
+          gpuAvailable={compute.gpuAvailable}
+          gpuInfo={compute.gpuInfo}
+          enabled={compute.enabled}
+          toggle={compute.toggle}
+          status={compute.status}
+          currentJob={compute.currentJob}
+          jobsThisSession={compute.jobsThisSession}
+          coinsThisSession={compute.coinsThisSession}
+          workerStats={compute.workerStats}
+          membership={compute.membership}
+        />
       ) : view === "profile" ? (
         <Profile
           userId={userId}
@@ -587,6 +613,7 @@ export default function App() {
           onSignInGoogle={signInWithGoogle}
           onSignInTwitter={signInWithTwitter}
           onSignOut={signOut}
+          computeStats={compute.workerStats}
         />
       ) : (
         <Rankings ranked={ranked} />
