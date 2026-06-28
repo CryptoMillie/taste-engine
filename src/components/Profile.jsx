@@ -3,6 +3,21 @@ import { T } from "../theme";
 import { supabase } from "../api/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { fetchCoinHistory } from "../api/coins";
+import ApiKeys from "./ApiKeys";
+
+function ApiKeysSection({ userId }) {
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+    });
+  }, []);
+
+  if (!session) return null;
+  return <ApiKeys userId={userId} session={session} />;
+}
 
 export default function Profile({
   userId,
@@ -318,6 +333,11 @@ export default function Profile({
             </div>
           </div>
         </div>
+      )}
+
+      {/* API Keys */}
+      {userId && supabase && (
+        <ApiKeysSection userId={userId} />
       )}
 
       {/* Earnings */}

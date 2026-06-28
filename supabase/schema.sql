@@ -820,3 +820,31 @@ select cron.schedule(
   '* * * * *',
   $$ select expire_stale_compute_jobs(); $$
 );
+
+-- ══════════════════════════════════════════════════════════════════
+-- API Keys for external buyers / AI agents
+-- ══════════════════════════════════════════════════════════════════
+
+create table if not exists api_keys (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id),
+  key_hash text not null unique,
+  key_prefix text not null,
+  name text not null default 'Default',
+  usage_count integer not null default 0,
+  usage_tokens integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_api_keys_user on api_keys(user_id);
+create index if not exists idx_api_keys_hash on api_keys(key_hash);
+
+alter table api_keys enable row level security;
+
+create policy "Users read own api keys" on api_keys
+  for select using (auth.uid() = user_id);
+create policy "Users insert own api keys" on api_keys
+  for insert with check (auth.uid() = user_id);
+create policy "Users update own api keys" on api_keys
+  for update using (auth.uid() = user_id);

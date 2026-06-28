@@ -1,16 +1,30 @@
 /**
  * GPU Compute Web Worker
- * Runs WebGPU compute jobs in a sandboxed worker thread.
- * MVP: 256x256 matrix multiply benchmark.
+ * Runs WebLLM inference + WebGPU benchmarks in a sandboxed worker thread.
  *
- * Messages IN:  { type: "execute", jobId, jobType, payload }
- * Messages OUT: { type: "result", jobId, resultEncrypted, resultHash }
- *               { type: "error", jobId, error }
+ * Messages IN:
+ *   { type: "warmup" }                                    — load LLM model
+ *   { type: "execute", jobId, jobType, payload }          — run a job
+ *
+ * Messages OUT:
+ *   { type: "model-status", status, progress, message }   — model load progress
+ *   { type: "result", jobId, resultEncrypted, resultHash }
+ *   { type: "error", jobId, error }
  */
 
 /* global self */
 
-// SHA-256 hash using SubtleCrypto
+import * as webllm from "@mlc-ai/web-llm";
+
+// ── State ────────────────────────────────────────────────────────────
+let engine = null;
+let modelReady = false;
+let modelLoading = false;
+
+const MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
 async function sha256(text) {
   const data = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -19,7 +33,100 @@ async function sha256(text) {
     .join("");
 }
 
-// Run a 256x256 matrix multiply benchmark on WebGPU
+// ── Model loading ────────────────────────────────────────────────────
+
+async function loadModel() {
+  if (modelReady || modelLoading) return;
+  modelLoading = true;
+
+  self.postMessage({
+    type: "model-status",
+    status: "downloading",
+    progress: 0,
+    message: "Starting model download...",
+  });
+
+  try {
+    engine = await webllm.CreateMLCEngine(MODEL_ID, {
+      initProgressCallback: (report) => {
+        const progress = Math.round((report.progress || 0) * 100);
+        const status = progress < 100 ? "downloading" : "loading";
+        self.postMessage({
+          type: "model-status",
+          status,
+          progress,
+          message: report.text || `Loading model... ${progress}%`,
+        });
+      },
+    });
+
+    modelReady = true;
+    modelLoading = false;
+
+    self.postMessage({
+      type: "model-status",
+      status: "ready",
+      progress: 100,
+      message: "Model ready",
+    });
+  } catch (err) {
+    modelLoading = false;
+    self.postMessage({
+      type: "model-status",
+      status: "error",
+      progress: 0,
+      message: err.message || "Failed to load model",
+    });
+  }
+}
+
+// ── Inference ────────────────────────────────────────────────────────
+
+async function runInference(payload) {
+  if (!engine || !modelReady) {
+    throw new Error("Model not loaded — send warmup first");
+  }
+
+  // Decode payload: base64 JSON with { messages, max_tokens?, temperature? }
+  let params;
+  try {
+    const decoded = atob(payload);
+    params = JSON.parse(decoded);
+  } catch {
+    // Try plain JSON
+    params = typeof payload === "string" ? JSON.parse(payload) : payload;
+  }
+
+  const messages = params.messages || [
+    { role: "user", content: String(params) },
+  ];
+
+  const response = await engine.chat.completions.create({
+    messages,
+    max_tokens: params.max_tokens || 512,
+    temperature: params.temperature ?? 0.7,
+  });
+
+  return {
+    id: `chatcmpl-${Date.now()}`,
+    object: "chat.completion",
+    model: MODEL_ID,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: response.choices[0]?.message?.content || "",
+        },
+        finish_reason: response.choices[0]?.finish_reason || "stop",
+      },
+    ],
+    usage: response.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+  };
+}
+
+// ── Benchmark (kept from original) ───────────────────────────────────
+
 async function runMatrixBenchmark() {
   if (!navigator.gpu) {
     throw new Error("WebGPU not available");
@@ -33,7 +140,6 @@ async function runMatrixBenchmark() {
   const SIZE = 256;
   const ELEMENTS = SIZE * SIZE;
 
-  // Create input matrices (random floats)
   const matA = new Float32Array(ELEMENTS);
   const matB = new Float32Array(ELEMENTS);
   for (let i = 0; i < ELEMENTS; i++) {
@@ -41,7 +147,6 @@ async function runMatrixBenchmark() {
     matB[i] = Math.random();
   }
 
-  // Create GPU buffers
   const bufferA = device.createBuffer({
     size: matA.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -62,7 +167,6 @@ async function runMatrixBenchmark() {
   device.queue.writeBuffer(bufferA, 0, matA);
   device.queue.writeBuffer(bufferB, 0, matB);
 
-  // Compute shader: matrix multiply
   const shaderModule = device.createShaderModule({
     code: `
       @group(0) @binding(0) var<storage, read> a: array<f32>;
@@ -116,7 +220,6 @@ async function runMatrixBenchmark() {
 
   const elapsed = performance.now() - startTime;
 
-  // Compute summary stats
   let sum = 0;
   let min = Infinity;
   let max = -Infinity;
@@ -126,7 +229,6 @@ async function runMatrixBenchmark() {
     if (output[i] > max) max = output[i];
   }
 
-  // Cleanup GPU resources
   bufferA.destroy();
   bufferB.destroy();
   bufferResult.destroy();
@@ -143,17 +245,24 @@ async function runMatrixBenchmark() {
   };
 }
 
-// Message handler
+// ── Message handler ──────────────────────────────────────────────────
+
 self.onmessage = async (e) => {
-  const { type, jobId, jobType } = e.data;
+  const { type, jobId, jobType, payload } = e.data;
+
+  if (type === "warmup") {
+    loadModel();
+    return;
+  }
 
   if (type !== "execute") return;
 
   try {
     let result;
 
-    if (jobType === "benchmark" || jobType === "inference" || jobType === "embedding") {
-      // MVP: all job types run the matrix benchmark
+    if (jobType === "inference" || jobType === "embedding") {
+      result = await runInference(payload);
+    } else if (jobType === "benchmark") {
       result = await runMatrixBenchmark();
     } else {
       throw new Error(`Unknown job type: ${jobType}`);
@@ -161,7 +270,6 @@ self.onmessage = async (e) => {
 
     const resultStr = JSON.stringify(result);
     const resultHash = await sha256(resultStr);
-    // Base64-encode the result as "encrypted" output (MVP — no real encryption in worker)
     const resultEncrypted = btoa(resultStr);
 
     self.postMessage({

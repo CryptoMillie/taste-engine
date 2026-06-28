@@ -16,6 +16,40 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+/** SHA-256 hash for API key lookup. */
+async function sha256Key(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Resolve user_id from API key (te_live_) or Supabase JWT. */
+async function resolveAuth(
+  req: Request,
+  supabase: ReturnType<typeof createClient>
+): Promise<string | null> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) return null;
+
+  const token = authHeader.slice(7);
+
+  if (token.startsWith("te_live_")) {
+    const keyHash = await sha256Key(token);
+    const { data } = await supabase
+      .from("api_keys")
+      .select("user_id, is_active")
+      .eq("key_hash", keyHash)
+      .single();
+    if (!data || !data.is_active) return null;
+    return data.user_id;
+  }
+
+  const { data: { user } } = await supabase.auth.getUser(token);
+  return user?.id || null;
+}
+
 /** Decrypt AES-256-GCM ciphertext (base64 with prepended IV). */
 async function decrypt(cipherBase64: string, keyHex: string): Promise<string> {
   const keyBytes = new Uint8Array(
@@ -82,14 +116,8 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
   );
 
-  // Verify buyer owns the job
-  let buyerId: string | null = null;
-  const authHeader = req.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.slice(7);
-    const { data: { user } } = await supabase.auth.getUser(token);
-    buyerId = user?.id || null;
-  }
+  // Verify buyer owns the job (supports API key + JWT)
+  const buyerId = await resolveAuth(req, supabase);
 
   const { data: job, error } = await supabase
     .from("compute_jobs")

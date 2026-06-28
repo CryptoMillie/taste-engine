@@ -1,17 +1,18 @@
 /**
  * Chutes AI inference client — taste intelligence via DeepSeek.
- * OpenAI-compatible API for structured taste reasoning.
+ * Dual-path: tries the compute network first, falls back to Chutes API.
  */
+
+import { networkInfer } from "./compute-inference";
 
 const CHUTES_URL = "https://chutes-deepseek-ai-deepseek-v3-2-tee.chutes.ai/v1/chat/completions";
 const CHUTES_KEY = import.meta.env.VITE_CHUTES_API_KEY;
 const MODEL = "deepseek-ai/DeepSeek-V3.2-TEE";
 
 /**
- * Call Chutes inference with a system + user prompt.
- * Returns parsed JSON or raw text.
+ * Call Chutes API directly (fallback path).
  */
-async function infer(systemPrompt, userPrompt, jsonMode = true) {
+async function chutesInfer(systemPrompt, userPrompt) {
   if (!CHUTES_KEY) return null;
 
   try {
@@ -35,25 +36,40 @@ async function infer(systemPrompt, userPrompt, jsonMode = true) {
     if (!res.ok) return null;
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
-    if (!content) return null;
-
-    if (jsonMode) {
-      const jsonMatch = content.match(/[\[{][\s\S]*[\]}]/);
-      if (jsonMatch) {
-        try {
-          return JSON.parse(jsonMatch[0]);
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    }
-
-    return content;
+    return data.choices?.[0]?.message?.content?.trim() || null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Dual-path inference: try compute network first, fall back to Chutes API.
+ * Returns parsed JSON or raw text.
+ */
+async function infer(systemPrompt, userPrompt, jsonMode = true) {
+  // Try network first (self-consuming path)
+  let content = await networkInfer(systemPrompt, userPrompt).catch(() => null);
+
+  // Fall back to Chutes API
+  if (!content) {
+    content = await chutesInfer(systemPrompt, userPrompt);
+  }
+
+  if (!content) return null;
+
+  if (jsonMode) {
+    const jsonMatch = content.match(/[\[{][\s\S]*[\]}]/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  return content;
 }
 
 /**

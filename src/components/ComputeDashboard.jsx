@@ -36,6 +36,8 @@ export default function ComputeDashboard({
   membership,
   sessionElapsed,
   earningsRate,
+  modelStatus,
+  modelProgress,
   networkStats,
 }) {
   const totalJobs = workerStats?.total_jobs || 0;
@@ -172,6 +174,43 @@ export default function ComputeDashboard({
         )}
       </div>
 
+      {/* Model Loading Progress */}
+      {enabled && modelStatus && modelStatus !== "ready" && modelStatus !== "idle" && (
+        <div style={sectionStyle}>
+          <div className="mono" style={{
+            fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10,
+          }}>
+            {modelStatus === "error" ? "MODEL ERROR" : "LOADING AI MODEL"}
+          </div>
+          {modelStatus !== "error" ? (
+            <>
+              <div style={{
+                width: "100%", height: 8, background: T.line,
+                borderRadius: 4, overflow: "hidden", marginBottom: 8,
+              }}>
+                <div style={{
+                  width: `${modelProgress}%`, height: "100%",
+                  background: "#16a34a", borderRadius: 4,
+                  transition: "width 0.3s ease",
+                }} />
+              </div>
+              <div style={{ fontSize: 12, color: T.soft }}>
+                {modelStatus === "downloading"
+                  ? `Downloading model... ${modelProgress}%`
+                  : `Loading into GPU... ${modelProgress}%`}
+              </div>
+              <div style={{ fontSize: 11, color: T.soft, marginTop: 4 }}>
+                ~1.2 GB, cached after first download
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: T.pop }}>
+              Failed to load model. Your GPU may not support WebLLM.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Live Session */}
       {enabled && (
         <div style={sectionStyle}>
@@ -213,7 +252,9 @@ export default function ComputeDashboard({
                   flexShrink: 0,
                 }} />
                 <div style={{ fontSize: 13, fontWeight: 500 }}>
-                  Processing job...
+                  {currentJob.job_type === "inference" ? "Running inference..." :
+                   currentJob.job_type === "benchmark" ? "Running benchmark..." :
+                   "Processing job..."}
                   <span style={{ color: "#16a34a", marginLeft: 6 }}>
                     +${Number(currentJob.usdc_reward || 0.0005).toFixed(4)}
                   </span>
@@ -379,6 +420,32 @@ export default function ComputeDashboard({
 
       {/* Membership */}
       <MembershipGate membership={membership} earningsRate={earningsRate} />
+
+      {/* API Access */}
+      <div style={sectionStyle}>
+        <div className="mono" style={{
+          fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10,
+        }}>
+          API ACCESS
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+          OpenAI-compatible endpoint
+        </div>
+        <code style={{
+          display: "block", fontSize: 12, background: T.paper,
+          padding: "10px 12px", borderRadius: 10, wordBreak: "break-all",
+          marginBottom: 10,
+        }}>
+          POST /functions/v1/v1-chat-completions
+        </code>
+        <div style={{ fontSize: 12, color: T.soft, marginBottom: 8 }}>
+          Use your API key to send inference requests. Workers on the network
+          process them and earn USDC.
+        </div>
+        <div style={{ fontSize: 12, color: T.soft }}>
+          Manage API keys in your <strong>Profile</strong> page.
+        </div>
+      </div>
 
       <style>{`
         @keyframes spin {

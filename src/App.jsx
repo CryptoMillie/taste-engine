@@ -608,6 +608,8 @@ export default function App() {
           networkStats={compute.networkStats}
           sessionElapsed={compute.sessionElapsed}
           earningsRate={compute.earningsRate}
+          modelStatus={compute.modelStatus}
+          modelProgress={compute.modelProgress}
         />
       ) : view === "profile" ? (
         <Profile

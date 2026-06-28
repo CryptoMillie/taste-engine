@@ -35,6 +35,8 @@ export function useCompute(userId) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
   const [networkStats, setNetworkStats] = useState(null);
+  const [modelStatus, setModelStatus] = useState("idle"); // idle | downloading | loading | ready | error
+  const [modelProgress, setModelProgress] = useState(0);
 
   const workerIdRef = useRef(null);
   const gpuWorkerRef = useRef(null);
@@ -89,22 +91,35 @@ export function useCompute(userId) {
     fetchNetworkStats().then((n) => { if (n) setNetworkStats(n); });
   }, [refreshStats]);
 
+  // Ensure worker is created and has model-status handler
+  const ensureWorker = useCallback(() => {
+    if (!gpuWorkerRef.current) {
+      gpuWorkerRef.current = new Worker(
+        new URL("../workers/compute-worker.js", import.meta.url),
+        { type: "module" }
+      );
+    }
+    return gpuWorkerRef.current;
+  }, []);
+
   // Execute a job via the Web Worker
   const executeJob = useCallback(
     (job) => {
-      if (!gpuWorkerRef.current) {
-        gpuWorkerRef.current = new Worker(
-          new URL("../workers/compute-worker.js", import.meta.url),
-          { type: "module" }
-        );
-      }
+      const worker = ensureWorker();
 
       setCurrentJob(job);
       setStatus("busy");
       busyRef.current = true;
 
-      gpuWorkerRef.current.onmessage = async (e) => {
+      worker.onmessage = async (e) => {
         const msg = e.data;
+
+        if (msg.type === "model-status") {
+          setModelStatus(msg.status);
+          setModelProgress(msg.progress || 0);
+          return;
+        }
+
         if (msg.type === "result" && msg.jobId === job.id) {
           const earned = await submitJobResult(
             job.id,
@@ -127,14 +142,14 @@ export function useCompute(userId) {
         }
       };
 
-      gpuWorkerRef.current.postMessage({
+      worker.postMessage({
         type: "execute",
         jobId: job.id,
         jobType: job.job_type,
         payload: job.payload_encrypted,
       });
     },
-    [refreshStats]
+    [ensureWorker, refreshStats]
   );
 
   // Poll for jobs
@@ -196,6 +211,17 @@ export function useCompute(userId) {
         }
 
         workerIdRef.current = worker.id;
+
+        // Start model warmup in the Web Worker
+        const gpuWorker = ensureWorker();
+        gpuWorker.onmessage = (e) => {
+          const msg = e.data;
+          if (msg.type === "model-status") {
+            setModelStatus(msg.status);
+            setModelProgress(msg.progress || 0);
+          }
+        };
+        gpuWorker.postMessage({ type: "warmup" });
 
         // These can fail silently — non-blocking
         await Promise.race([
@@ -273,6 +299,8 @@ export function useCompute(userId) {
     networkStats,
     sessionElapsed,
     earningsRate,
+    modelStatus,
+    modelProgress,
     refreshStats,
   };
 }
