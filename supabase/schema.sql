@@ -769,6 +769,51 @@ begin
 end;
 $$ language plpgsql security definer;
 
+-- ── Network stats (aggregate only — no user IDs exposed) ───────────
+create or replace function compute_network_stats()
+returns jsonb as $$
+declare
+  v_workers_online integer;
+  v_workers_busy integer;
+  v_jobs_pending integer;
+  v_jobs_active integer;
+  v_jobs_completed integer;
+  v_total_usdc_paid numeric(12,6);
+  v_total_coins_paid bigint;
+begin
+  select count(*) into v_workers_online
+  from compute_workers where status in ('idle', 'busy');
+
+  select count(*) into v_workers_busy
+  from compute_workers where status = 'busy';
+
+  select count(*) into v_jobs_pending
+  from compute_jobs where status = 'pending' and expires_at > now();
+
+  select count(*) into v_jobs_active
+  from compute_jobs where status in ('assigned', 'running');
+
+  select count(*) into v_jobs_completed
+  from compute_jobs where status = 'completed';
+
+  select coalesce(sum(total_usdc_earned), 0) into v_total_usdc_paid
+  from compute_workers;
+
+  select coalesce(sum(total_coins_earned), 0) into v_total_coins_paid
+  from compute_workers;
+
+  return jsonb_build_object(
+    'workers_online', v_workers_online,
+    'workers_busy', v_workers_busy,
+    'jobs_pending', v_jobs_pending,
+    'jobs_active', v_jobs_active,
+    'jobs_completed', v_jobs_completed,
+    'total_usdc_paid', v_total_usdc_paid,
+    'total_coins_paid', v_total_coins_paid
+  );
+end;
+$$ language plpgsql security definer;
+
 -- Cron: expire stale compute jobs every minute
 select cron.schedule(
   'expire-stale-compute-jobs',

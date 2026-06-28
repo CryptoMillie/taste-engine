@@ -170,6 +170,18 @@ export async function fetchMembership(userId) {
   }
 }
 
+/** Fetch aggregate network stats (no user IDs — public safe). */
+export async function fetchNetworkStats() {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.rpc("compute_network_stats");
+    if (error) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 /** Initialize membership for a user (free tier + 48hr trial). */
 export async function initMembership(userId) {
   if (!supabase || !userId) return null;

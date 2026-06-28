@@ -36,6 +36,7 @@ export default function ComputeDashboard({
   membership,
   sessionElapsed,
   earningsRate,
+  networkStats,
 }) {
   const totalJobs = workerStats?.total_jobs || 0;
   const totalUsdc = Number(workerStats?.total_usdc_earned || 0);
@@ -304,6 +305,54 @@ export default function ComputeDashboard({
           </div>
         )}
       </div>
+
+      {/* Network Stats */}
+      {networkStats && (
+        <div style={{
+          ...sectionStyle,
+          background: T.ink,
+          color: T.paper,
+          border: "none",
+        }}>
+          <div className="mono" style={{
+            fontSize: 10, letterSpacing: "0.16em", marginBottom: 12, opacity: 0.5,
+          }}>
+            NETWORK
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#4ade80" }}>
+                {networkStats.workers_online || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Workers online</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#facc15" }}>
+                {networkStats.workers_busy || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Busy</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700 }}>
+                {networkStats.jobs_pending || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Jobs queued</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700 }}>
+                {networkStats.jobs_completed || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Completed</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#4ade80" }}>
+                ${Number(networkStats.total_usdc_paid || 0).toFixed(2)}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>USDC paid out</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* GPU info — local only */}
       <div style={sectionStyle}>

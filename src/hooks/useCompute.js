@@ -9,6 +9,7 @@ import {
   fetchWorkerStats,
   fetchMembership,
   initMembership,
+  fetchNetworkStats,
   classifyGpu,
   EARNINGS_RATES,
 } from "../api/compute";
@@ -33,6 +34,7 @@ export function useCompute(userId) {
   const [sessionElapsed, setSessionElapsed] = useState(0); // seconds
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
+  const [networkStats, setNetworkStats] = useState(null);
 
   const workerIdRef = useRef(null);
   const gpuWorkerRef = useRef(null);
@@ -70,16 +72,22 @@ export function useCompute(userId) {
 
   const refreshStats = useCallback(async () => {
     if (!userId) return;
-    const [stats, mem] = await Promise.all([
+    const [stats, mem, net] = await Promise.all([
       fetchWorkerStats(userId),
       fetchMembership(userId),
+      fetchNetworkStats(),
     ]);
     if (stats) setWorkerStats(stats);
     if (mem) setMembership(mem);
+    if (net) setNetworkStats(net);
   }, [userId]);
 
-  // Fetch stats on mount
-  useEffect(() => { refreshStats(); }, [refreshStats]);
+  // Fetch stats on mount (and network stats even without userId)
+  useEffect(() => {
+    refreshStats();
+    // Also fetch network stats for non-logged-in view
+    fetchNetworkStats().then((n) => { if (n) setNetworkStats(n); });
+  }, [refreshStats]);
 
   // Execute a job via the Web Worker
   const executeJob = useCallback(
@@ -262,6 +270,7 @@ export function useCompute(userId) {
     usdcThisSession,
     workerStats,
     membership,
+    networkStats,
     sessionElapsed,
     earningsRate,
     refreshStats,

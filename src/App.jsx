@@ -605,6 +605,7 @@ export default function App() {
           usdcThisSession={compute.usdcThisSession}
           workerStats={compute.workerStats}
           membership={compute.membership}
+          networkStats={compute.networkStats}
           sessionElapsed={compute.sessionElapsed}
           earningsRate={compute.earningsRate}
         />
