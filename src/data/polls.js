@@ -157,4 +157,4 @@ export const POLLS = [
   },
 ];
 
-export const POLL_CATEGORIES = ["All", "Sports", "Food", "Tech", "Culture", "Animals", "Cars"];
+export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars"];
