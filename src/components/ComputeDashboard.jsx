@@ -729,8 +729,7 @@ export default function ComputeDashboard({
           </a>
         </div>
         <div style={{ fontSize: 11, opacity: 0.5, marginTop: 10 }}>
-          Powered by c0mpute — the same network our Shard inference routes through.
-          Your GPU strengthens the pool for all users.
+          Earn more by running frontier models on your dedicated GPU.
         </div>
       </div>
 
