@@ -1122,11 +1122,14 @@ alter table shard_models enable row level security;
 create policy "Shard models are publicly readable" on shard_models
   for select using (true);
 
--- Seed rows
-insert into shard_models (model_name, gateway_url, description)
+-- Seed rows (c0mpute models)
+insert into shard_models (model_name, gateway_url, is_active, cost_per_million_tokens, description)
 values
-  ('minimax-m2.5', 'https://shard-gateway.placeholder/v1', 'MiniMax-M2.5 frontier model via Shard distributed inference'),
-  ('shard-default', 'https://shard-gateway.placeholder/v1', 'Default Shard model for general inference')
+  ('c0mpute-pro', 'https://c0mpute.ai/api', true, 3.0, 'Uncensored 8B - fast, broad worker availability'),
+  ('c0mpute-max', 'https://c0mpute.ai/api', true, 4.5, 'Uncensored 27B with tools, vision, and large context'),
+  ('c0mpute-max-think', 'https://c0mpute.ai/api', true, 6.0, 'c0mpute-max with extended chain-of-thought reasoning'),
+  ('supergemma4-26b', 'https://c0mpute.ai/api', true, 4.5, 'Uncensored SuperGemma4 26B MoE with tools'),
+  ('code', 'https://c0mpute.ai/api', true, 4.5, 'Devstral 24B agentic coding model')
 on conflict (model_name) do nothing;
 
 -- Shard jobs: tracks Shard inference requests (separate from compute_jobs)

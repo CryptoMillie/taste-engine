@@ -154,11 +154,19 @@ async function handleShardRequest(
     const effectiveGateway =
       Deno.env.get("SHARD_GATEWAY_URL") || gatewayUrl;
 
+    const gatewayHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const c0mputeKey = Deno.env.get("C0MPUTE_API_KEY");
+    if (c0mputeKey) {
+      gatewayHeaders["Authorization"] = `Bearer ${c0mputeKey}`;
+    }
+
     const gatewayResponse = await fetch(
       effectiveGateway.replace(/\/+$/, "") + "/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: gatewayHeaders,
         body: JSON.stringify({ model, messages, max_tokens, temperature }),
       }
     );
