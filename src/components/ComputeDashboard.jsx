@@ -652,6 +652,123 @@ export default function ComputeDashboard({
       {/* Membership */}
       <MembershipGate membership={membership} earningsRate={earningsRate} />
 
+      {/* Native Worker */}
+      <div style={{
+        ...sectionStyle,
+        background: "linear-gradient(135deg, #1e1b4b, #312e81)",
+        color: T.paper,
+        border: "none",
+      }}>
+        <div className="mono" style={{
+          fontSize: 10, letterSpacing: "0.16em", marginBottom: 12, opacity: 0.5,
+        }}>
+          EARN MORE WITH NATIVE GPU
+        </div>
+        <div style={{ display: "flex", gap: 16, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>
+              Native Worker
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 10, lineHeight: 1.5 }}>
+              Run a 27B model natively on your GPU via terminal. Earns $0.10–$0.14 per job
+              — higher pay than browser workers.
+            </div>
+            <div style={{
+              fontSize: 12, opacity: 0.6, marginBottom: 12,
+              padding: "8px 10px", background: "rgba(255,255,255,0.08)", borderRadius: 8,
+            }}>
+              Requires: dedicated GPU (RTX 3060+), ~18 GB VRAM, terminal access
+            </div>
+          </div>
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            minWidth: 90, gap: 4,
+          }}>
+            <div className="disp" style={{ fontSize: 28, fontWeight: 800, color: "#4ade80" }}>
+              $0.14
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.6 }}>/job</div>
+          </div>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <div className="mono" style={{ fontSize: 10, opacity: 0.5, marginBottom: 6, letterSpacing: "0.08em" }}>
+            QUICK START
+          </div>
+          <code style={{
+            display: "block", fontSize: 11, background: "rgba(0,0,0,0.3)",
+            padding: "10px 12px", borderRadius: 8, wordBreak: "break-all",
+            color: "#c4b5fd", lineHeight: 1.6,
+          }}>
+            pip install c0mpute{"\n"}c0mpute worker start
+          </code>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a
+            href="https://c0mpute.ai/earn"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-block", background: "#7c3aed", color: T.paper,
+              padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+              textDecoration: "none", textAlign: "center", flex: 1,
+            }}
+          >
+            Set Up Native Worker
+          </a>
+          <a
+            href="https://docs.c0mpute.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-block", background: "rgba(255,255,255,0.1)", color: T.paper,
+              padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+              textDecoration: "none", textAlign: "center",
+            }}
+          >
+            Docs
+          </a>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 10 }}>
+          Powered by c0mpute — the same network our Shard inference routes through.
+          Your GPU strengthens the pool for all users.
+        </div>
+      </div>
+
+      {/* Browser vs Native comparison */}
+      <div style={sectionStyle}>
+        <div className="mono" style={{
+          fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+        }}>
+          BROWSER vs NATIVE
+        </div>
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{
+            flex: 1, padding: "12px 14px", background: T.paper, borderRadius: 10,
+            border: `1px solid ${T.line}`,
+          }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Browser Worker</div>
+            <div style={{ fontSize: 12, color: T.soft, lineHeight: 1.5 }}>
+              Runs in a tab via WebGPU. Lower earnings, zero setup. Good for any GPU.
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#d97706", marginTop: 8 }}>
+              ~$0.07/job
+            </div>
+          </div>
+          <div style={{
+            flex: 1, padding: "12px 14px", background: T.paper, borderRadius: 10,
+            border: "1px solid #7c3aed",
+          }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: "#7c3aed" }}>Native Worker</div>
+            <div style={{ fontSize: 12, color: T.soft, lineHeight: 1.5 }}>
+              Runs 27B model natively. Higher earnings, needs dedicated GPU + terminal.
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#16a34a", marginTop: 8 }}>
+              $0.10–$0.14/job
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* API Access */}
       <div style={sectionStyle}>
         <div className="mono" style={{
