@@ -155,6 +155,75 @@ export const POLLS = [
     itemA: { id: "tesla", name: "Tesla", sub: "ELECTRIC VEHICLE MAKER", cat: "cars", img: "https://upload.wikimedia.org/wikipedia/commons/9/91/2019_Tesla_Model_3_Performance_AWD_Front.jpg" },
     itemB: { id: "porsche-brand", name: "Porsche", sub: "GERMAN SPORTS CAR BRAND", cat: "cars", img: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Porsche_911_No_1000000%2C_70_Years_Porsche_Sports_Car%2C_Berlin_%281X7A3888%29.jpg/3840px-Porsche_911_No_1000000%2C_70_Years_Porsche_Sports_Car%2C_Berlin_%281X7A3888%29.jpg" },
   },
+
+  // — Anime —
+  {
+    id: "poll-naruto-goku",
+    category: "Anime",
+    label: "Greatest anime fighter",
+    itemA: { id: "naruto", name: "Naruto", sub: "NINJA FROM KONOHA", cat: "anime", img: "https://upload.wikimedia.org/wikipedia/en/9/94/NasNaruto.png" },
+    itemB: { id: "goku", name: "Goku", sub: "SAIYAN WARRIOR", cat: "anime", img: "https://upload.wikimedia.org/wikipedia/en/4/4c/GokuAnime.png" },
+  },
+  {
+    id: "poll-demonslayer-aot",
+    category: "Anime",
+    label: "Best modern anime",
+    itemA: { id: "demon-slayer", name: "Demon Slayer", sub: "MANGA & ANIME SERIES", cat: "anime", img: "https://upload.wikimedia.org/wikipedia/en/0/09/Demon_Slayer_-_Kimetsu_no_Yaiba%2C_volume_1.jpg" },
+    itemB: { id: "attack-on-titan", name: "Attack on Titan", sub: "MANGA & ANIME SERIES", cat: "anime", img: "https://upload.wikimedia.org/wikipedia/en/d/d6/Shingeki_no_Kyojin_manga_volume_1.jpg" },
+  },
+  {
+    id: "poll-onepiece-dragonball",
+    category: "Anime",
+    label: "Anime GOAT series",
+    itemA: { id: "one-piece", name: "One Piece", sub: "MANGA & ANIME SERIES", cat: "anime", img: "https://upload.wikimedia.org/wikipedia/en/9/90/One_Piece%2C_Volume_61_Cover_%28Japanese%29.jpg" },
+    itemB: { id: "dragon-ball", name: "Dragon Ball", sub: "MANGA & ANIME SERIES", cat: "anime", img: "https://upload.wikimedia.org/wikipedia/en/c/c9/Dragon_Ball_Z_Box_Set_vol._1_%282009%29.jpg" },
+  },
+
+  // — Music —
+  {
+    id: "poll-drake-kendrick",
+    category: "Music",
+    label: "Rap king crown",
+    itemA: { id: "drake", name: "Drake", sub: "CANADIAN RAPPER", cat: "music", img: "https://upload.wikimedia.org/wikipedia/commons/2/28/Drake_July_2016.jpg" },
+    itemB: { id: "kendrick-lamar", name: "Kendrick Lamar", sub: "AMERICAN RAPPER", cat: "music", img: "https://upload.wikimedia.org/wikipedia/commons/3/32/Kendrick_Lamar_2016.jpg" },
+  },
+  {
+    id: "poll-eminem-jayz",
+    category: "Music",
+    label: "Greatest rapper alive",
+    itemA: { id: "eminem", name: "Eminem", sub: "AMERICAN RAPPER", cat: "music", img: "https://upload.wikimedia.org/wikipedia/commons/6/6e/Eminem_performing_in_2018.jpg" },
+    itemB: { id: "jay-z", name: "Jay-Z", sub: "AMERICAN RAPPER & MOGUL", cat: "music", img: "https://upload.wikimedia.org/wikipedia/commons/5/50/Jay_Z_Kanye_West_Watch_the_Throne_Cropped.jpg" },
+  },
+  {
+    id: "poll-beatles-pinkfloyd",
+    category: "Music",
+    label: "Rock legends face-off",
+    itemA: { id: "the-beatles", name: "The Beatles", sub: "ENGLISH ROCK BAND", cat: "music", img: "https://upload.wikimedia.org/wikipedia/commons/d/df/The_Fabs.JPG" },
+    itemB: { id: "pink-floyd", name: "Pink Floyd", sub: "ENGLISH ROCK BAND", cat: "music", img: "https://upload.wikimedia.org/wikipedia/en/d/d6/Pink_Floyd_-_all_ass_members.jpg" },
+  },
+
+  // — Gaming —
+  {
+    id: "poll-mario-sonic",
+    category: "Gaming",
+    label: "Platformer king",
+    itemA: { id: "mario", name: "Mario", sub: "NINTENDO MASCOT", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/en/a/a9/MarioNSMBUDeluxe.png" },
+    itemB: { id: "sonic", name: "Sonic", sub: "SEGA MASCOT", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/en/0/0a/Sonic_the_Hedgehog_%28character%29.png" },
+  },
+  {
+    id: "poll-ps5-xbox",
+    category: "Gaming",
+    label: "Current-gen console war",
+    itemA: { id: "ps5", name: "PlayStation 5", sub: "SONY GAMING CONSOLE", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/commons/7/77/Black_PS5.png" },
+    itemB: { id: "xbox-series-x", name: "Xbox Series X", sub: "MICROSOFT GAMING CONSOLE", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/commons/4/43/Xbox-Series-X.png" },
+  },
+  {
+    id: "poll-minecraft-fortnite",
+    category: "Gaming",
+    label: "Most iconic game",
+    itemA: { id: "minecraft", name: "Minecraft", sub: "SANDBOX VIDEO GAME", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/en/5/51/Minecraft_cover.png" },
+    itemB: { id: "fortnite", name: "Fortnite", sub: "BATTLE ROYALE GAME", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/commons/0/0e/FortniteLogo.svg" },
+  },
 ];
 
-export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars"];
+export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars", "Anime", "Music", "Gaming"];

@@ -22,6 +22,8 @@ const CATEGORY_QUERIES = {
   music: "popular musicians and singers trending 2026 site:wikipedia.org",
   food: "most popular foods and dishes worldwide site:wikipedia.org",
   movies: "top trending movies and TV shows 2026 site:wikipedia.org",
+  anime: "top trending anime series and characters 2026 site:wikipedia.org",
+  gaming: "most popular video games and esports 2026 site:wikipedia.org",
 };
 
 /**
@@ -181,7 +183,7 @@ export async function fetchTrendingFromDesearch() {
   }
 
   // Fetch priority categories in parallel
-  const priorityCats = ["trending", "sports", "music", "food", "movies"];
+  const priorityCats = ["trending", "sports", "music", "food", "movies", "anime", "gaming"];
   const results = await Promise.allSettled(
     priorityCats.map((cat) => fetchCategoryFromDesearch(cat, 8))
   );

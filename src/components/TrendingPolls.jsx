@@ -296,17 +296,31 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
       ? livePolls
       : livePolls.filter((p) => p.category === activeCategory);
 
-  // Interleave: insert one live matchup every 2 curated polls
-  const combined = [];
-  const liveQueue = [...filteredLive];
-  for (let i = 0; i < filteredCurated.length; i++) {
-    combined.push(filteredCurated[i]);
-    if ((i + 1) % 2 === 0 && liveQueue.length > 0) {
-      combined.push(liveQueue.shift());
-    }
+  // Weighted merge: live/trending polls get priority, curated fill gaps
+  // Live polls score higher so they float to the top of the grid
+  const scored = [];
+
+  // Live polls get a high base weight (recency-boosted)
+  filteredLive.forEach((p, i) => {
+    // Newer live matchups score higher (index 0 = most recent from DB)
+    const recencyBoost = Math.max(0, 10 - i);
+    scored.push({ poll: p, weight: 100 + recencyBoost });
+  });
+
+  // Curated polls get a lower base weight, shuffled so it's not the same order every time
+  const shuffled = [...filteredCurated];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    // Deterministic daily shuffle: same order within a day, fresh next day
+    const seed = (new Date().getDate() * 31 + i * 7) % (i + 1);
+    [shuffled[i], shuffled[seed]] = [shuffled[seed], shuffled[i]];
   }
-  // Append remaining live matchups at the end
-  combined.push(...liveQueue);
+  shuffled.forEach((p, i) => {
+    scored.push({ poll: p, weight: 50 - i * 0.5 });
+  });
+
+  // Sort by weight descending — live/trending content surfaces first
+  scored.sort((a, b) => b.weight - a.weight);
+  const combined = scored.map((s) => s.poll);
 
   const latestRefresh = liveMatchups[0]?.refreshedAt;
 
