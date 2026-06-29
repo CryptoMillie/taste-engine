@@ -138,13 +138,13 @@ export async function updateWorkerStatus(workerId, status) {
   } catch { /* ignore */ }
 }
 
-/** Fetch worker stats for a user. */
+/** Fetch worker stats for a user (includes trust/verification fields). */
 export async function fetchWorkerStats(userId) {
   if (!supabase || !userId) return null;
   try {
     const { data } = await supabase
       .from("compute_workers")
-      .select("id, gpu_class, status, total_jobs, total_coins_earned, total_usdc_earned")
+      .select("id, gpu_class, status, total_jobs, total_coins_earned, total_usdc_earned, trust_score, verification_count, verification_pass, verification_fail")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -152,6 +152,39 @@ export async function fetchWorkerStats(userId) {
     return data;
   } catch {
     return null;
+  }
+}
+
+/** Fetch worker trust score and verification counts. */
+export async function fetchWorkerTrust(userId) {
+  if (!supabase || !userId) return null;
+  try {
+    const { data } = await supabase
+      .from("compute_workers")
+      .select("trust_score, verification_count, verification_pass, verification_fail")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch recent verification history for a worker. */
+export async function fetchVerificationHistory(workerId, limit = 5) {
+  if (!supabase || !workerId) return [];
+  try {
+    const { data } = await supabase
+      .from("compute_verifications")
+      .select("id, verdict, similarity_score, verathos_model_used, verathos_latency_ms, created_at")
+      .eq("worker_id", workerId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    return data || [];
+  } catch {
+    return [];
   }
 }
 

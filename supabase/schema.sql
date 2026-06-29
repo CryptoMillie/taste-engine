@@ -848,3 +848,256 @@ create policy "Users insert own api keys" on api_keys
   for insert with check (auth.uid() = user_id);
 create policy "Users update own api keys" on api_keys
   for update using (auth.uid() = user_id);
+
+-- ══════════════════════════════════════════════════════════════════
+-- Verathos (SN96) Verification Layer
+-- ══════════════════════════════════════════════════════════════════
+
+-- 1a. Trust + verification columns on compute_workers
+alter table compute_workers add column if not exists trust_score integer not null default 50;
+alter table compute_workers add column if not exists verification_count integer not null default 0;
+alter table compute_workers add column if not exists verification_pass integer not null default 0;
+alter table compute_workers add column if not exists verification_fail integer not null default 0;
+alter table compute_workers add column if not exists last_verified_at timestamptz;
+
+create index if not exists idx_compute_workers_trust on compute_workers(trust_score desc);
+
+-- 1b. Verification status on compute_jobs
+alter table compute_jobs add column if not exists verification_status text default 'none'
+  check (verification_status in ('none','pending','verified','failed','error'));
+
+-- 1c. Verification records table
+create table if not exists compute_verifications (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references compute_jobs(id),
+  worker_id uuid not null references compute_workers(id),
+  verathos_request_payload jsonb,
+  verathos_response_text text,
+  verathos_response_hash text,
+  worker_response_text text,
+  worker_response_hash text,
+  verdict text not null default 'pending'
+    check (verdict in ('pending','pass','fail','error','inconclusive')),
+  similarity_score numeric(5,4),
+  similarity_method text default 'jaccard',
+  verathos_proof jsonb,
+  verathos_model_used text,
+  verathos_request_id text,
+  verathos_latency_ms integer,
+  shard_receipt jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_compute_verifications_job on compute_verifications(job_id);
+create index if not exists idx_compute_verifications_worker on compute_verifications(worker_id);
+create index if not exists idx_compute_verifications_verdict on compute_verifications(verdict);
+
+-- RLS: workers can read their own verifications
+alter table compute_verifications enable row level security;
+
+create policy "Workers read own verifications" on compute_verifications
+  for select using (
+    worker_id in (
+      select id from compute_workers where user_id = auth.uid()
+    )
+  );
+
+-- 1d. RPC: update worker trust score with Bayesian smoothing
+create or replace function update_worker_trust_score(
+  p_worker_id uuid,
+  p_verdict text
+) returns void as $$
+declare
+  v_pass integer;
+  v_total integer;
+  v_new_trust integer;
+begin
+  if p_verdict = 'pass' then
+    update compute_workers
+    set verification_count = verification_count + 1,
+        verification_pass = verification_pass + 1,
+        last_verified_at = now()
+    where id = p_worker_id;
+  elsif p_verdict = 'fail' then
+    update compute_workers
+    set verification_count = verification_count + 1,
+        verification_fail = verification_fail + 1,
+        last_verified_at = now()
+    where id = p_worker_id;
+  else
+    -- error/inconclusive: no trust penalty
+    return;
+  end if;
+
+  -- Bayesian smoothing: (pass + 5) / (total + 10) * 100
+  select verification_pass, verification_count
+  into v_pass, v_total
+  from compute_workers where id = p_worker_id;
+
+  v_new_trust := ((v_pass + 5)::numeric / (v_total + 10) * 100)::integer;
+
+  update compute_workers
+  set trust_score = v_new_trust
+  where id = p_worker_id;
+
+  -- Auto-suspend workers with trust < 20 after 5+ verifications
+  if v_new_trust < 20 and v_total >= 5 then
+    update compute_workers
+    set status = 'suspended'
+    where id = p_worker_id;
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- 1e. Modify claim_compute_job: reject suspended workers
+create or replace function claim_compute_job(
+  p_worker_id uuid
+) returns uuid as $$
+declare
+  v_job_id uuid;
+  v_user_id uuid;
+  v_worker_status text;
+  v_membership record;
+begin
+  -- Get user and status for this worker
+  select user_id, status into v_user_id, v_worker_status
+  from compute_workers where id = p_worker_id;
+
+  if v_user_id is null then
+    raise exception 'Worker not found';
+  end if;
+
+  -- Suspended workers cannot claim jobs
+  if v_worker_status = 'suspended' then
+    return null;
+  end if;
+
+  -- Check membership / daily limits
+  select * into v_membership
+  from compute_memberships where user_id = v_user_id;
+
+  if v_membership is not null then
+    -- Reset daily counter if needed
+    if v_membership.daily_jobs_reset_at <= now() then
+      update compute_memberships
+      set daily_jobs_used = 0,
+          daily_jobs_reset_at = now() + interval '1 day'
+      where user_id = v_user_id;
+      v_membership.daily_jobs_used := 0;
+    end if;
+
+    -- Free tier (trial expired): enforce 10 jobs/day
+    if v_membership.tier = 'free'
+       and v_membership.trial_ends_at <= now()
+       and v_membership.daily_jobs_used >= 10 then
+      return null; -- daily limit reached
+    end if;
+  end if;
+
+  -- Claim oldest pending job
+  select id into v_job_id
+  from compute_jobs
+  where status = 'pending'
+    and expires_at > now()
+  order by created_at asc
+  limit 1
+  for update skip locked;
+
+  if v_job_id is null then
+    return null; -- no jobs available
+  end if;
+
+  update compute_jobs
+  set status = 'assigned',
+      assigned_worker_id = p_worker_id
+  where id = v_job_id;
+
+  -- Bump daily usage
+  update compute_memberships
+  set daily_jobs_used = daily_jobs_used + 1
+  where user_id = v_user_id;
+
+  -- Mark worker busy
+  update compute_workers
+  set status = 'busy'
+  where id = p_worker_id;
+
+  return v_job_id;
+end;
+$$ language plpgsql security definer;
+
+-- 1f. Extend compute_network_stats with verification metrics
+create or replace function compute_network_stats()
+returns jsonb as $$
+declare
+  v_workers_online integer;
+  v_workers_busy integer;
+  v_jobs_pending integer;
+  v_jobs_active integer;
+  v_jobs_completed integer;
+  v_total_usdc_paid numeric(12,6);
+  v_total_coins_paid bigint;
+  v_verifications_total integer;
+  v_verifications_passed integer;
+  v_avg_trust_score numeric(5,1);
+begin
+  select count(*) into v_workers_online
+  from compute_workers where status in ('idle', 'busy');
+
+  select count(*) into v_workers_busy
+  from compute_workers where status = 'busy';
+
+  select count(*) into v_jobs_pending
+  from compute_jobs where status = 'pending' and expires_at > now();
+
+  select count(*) into v_jobs_active
+  from compute_jobs where status in ('assigned', 'running');
+
+  select count(*) into v_jobs_completed
+  from compute_jobs where status = 'completed';
+
+  select coalesce(sum(total_usdc_earned), 0) into v_total_usdc_paid
+  from compute_workers;
+
+  select coalesce(sum(total_coins_earned), 0) into v_total_coins_paid
+  from compute_workers;
+
+  select count(*) into v_verifications_total
+  from compute_verifications;
+
+  select count(*) into v_verifications_passed
+  from compute_verifications where verdict = 'pass';
+
+  select coalesce(avg(trust_score), 50) into v_avg_trust_score
+  from compute_workers where verification_count > 0;
+
+  return jsonb_build_object(
+    'workers_online', v_workers_online,
+    'workers_busy', v_workers_busy,
+    'jobs_pending', v_jobs_pending,
+    'jobs_active', v_jobs_active,
+    'jobs_completed', v_jobs_completed,
+    'total_usdc_paid', v_total_usdc_paid,
+    'total_coins_paid', v_total_coins_paid,
+    'verifications_total', v_verifications_total,
+    'verifications_passed', v_verifications_passed,
+    'avg_trust_score', v_avg_trust_score
+  );
+end;
+$$ language plpgsql security definer;
+
+-- Cron: trigger verify-compute every 2 minutes
+select cron.schedule(
+  'verify-compute-jobs',
+  '*/2 * * * *',
+  $$
+  select net.http_post(
+    url := current_setting('app.settings.supabase_url') || '/functions/v1/verify-compute',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);

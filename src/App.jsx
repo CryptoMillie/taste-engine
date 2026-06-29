@@ -610,6 +610,8 @@ export default function App() {
           earningsRate={compute.earningsRate}
           modelStatus={compute.modelStatus}
           modelProgress={compute.modelProgress}
+          trustScore={compute.trustScore}
+          verificationHistory={compute.verificationHistory}
         />
       ) : view === "profile" ? (
         <Profile

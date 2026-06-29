@@ -10,6 +10,7 @@ import {
   fetchMembership,
   initMembership,
   fetchNetworkStats,
+  fetchVerificationHistory,
   classifyGpu,
   EARNINGS_RATES,
 } from "../api/compute";
@@ -37,6 +38,8 @@ export function useCompute(userId) {
   const [networkStats, setNetworkStats] = useState(null);
   const [modelStatus, setModelStatus] = useState("idle"); // idle | downloading | loading | ready | error
   const [modelProgress, setModelProgress] = useState(0);
+  const [trustScore, setTrustScore] = useState(null);
+  const [verificationHistory, setVerificationHistory] = useState([]);
 
   const workerIdRef = useRef(null);
   const gpuWorkerRef = useRef(null);
@@ -79,7 +82,20 @@ export function useCompute(userId) {
       fetchMembership(userId),
       fetchNetworkStats(),
     ]);
-    if (stats) setWorkerStats(stats);
+    if (stats) {
+      setWorkerStats(stats);
+      setTrustScore({
+        score: stats.trust_score ?? 50,
+        count: stats.verification_count ?? 0,
+        pass: stats.verification_pass ?? 0,
+        fail: stats.verification_fail ?? 0,
+      });
+      // Fetch verification history if we have a worker ID
+      if (stats.id) {
+        const history = await fetchVerificationHistory(stats.id, 5);
+        setVerificationHistory(history);
+      }
+    }
     if (mem) setMembership(mem);
     if (net) setNetworkStats(net);
   }, [userId]);
@@ -301,6 +317,8 @@ export function useCompute(userId) {
     earningsRate,
     modelStatus,
     modelProgress,
+    trustScore,
+    verificationHistory,
     refreshStats,
   };
 }

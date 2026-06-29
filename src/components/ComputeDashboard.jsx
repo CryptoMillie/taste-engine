@@ -39,6 +39,8 @@ export default function ComputeDashboard({
   modelStatus,
   modelProgress,
   networkStats,
+  trustScore,
+  verificationHistory,
 }) {
   const totalJobs = workerStats?.total_jobs || 0;
   const totalUsdc = Number(workerStats?.total_usdc_earned || 0);
@@ -347,6 +349,98 @@ export default function ComputeDashboard({
         )}
       </div>
 
+      {/* Verification Trust Score */}
+      {trustScore && (
+        <div style={sectionStyle}>
+          <div className="mono" style={{
+            fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+          }}>
+            VERIFICATION TRUST SCORE
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
+            <div className="disp" style={{
+              fontSize: 48, fontWeight: 800,
+              color: trustScore.score >= 70 ? "#16a34a" : trustScore.score >= 40 ? "#d97706" : "#dc2626",
+            }}>
+              {trustScore.score}
+            </div>
+            <div style={{ fontSize: 13, color: T.soft }}>/100</div>
+          </div>
+          {/* Progress bar */}
+          <div style={{
+            width: "100%", height: 8, background: T.line,
+            borderRadius: 4, overflow: "hidden", marginBottom: 12,
+          }}>
+            <div style={{
+              width: `${trustScore.score}%`, height: "100%",
+              background: trustScore.score >= 70 ? "#16a34a" : trustScore.score >= 40 ? "#d97706" : "#dc2626",
+              borderRadius: 4, transition: "width 0.3s ease",
+            }} />
+          </div>
+          {/* Pass/fail counts */}
+          <div style={{ display: "flex", gap: 20, marginBottom: 14 }}>
+            <div>
+              <span style={{ fontWeight: 600, color: "#16a34a" }}>{trustScore.pass}</span>
+              <span style={{ fontSize: 12, color: T.soft, marginLeft: 4 }}>passed</span>
+            </div>
+            <div>
+              <span style={{ fontWeight: 600, color: "#dc2626" }}>{trustScore.fail}</span>
+              <span style={{ fontSize: 12, color: T.soft, marginLeft: 4 }}>failed</span>
+            </div>
+            <div>
+              <span style={{ fontWeight: 600 }}>{trustScore.count}</span>
+              <span style={{ fontSize: 12, color: T.soft, marginLeft: 4 }}>total checks</span>
+            </div>
+          </div>
+          {/* Info box */}
+          <div style={{
+            padding: "10px 14px", background: T.paper, borderRadius: 10,
+            fontSize: 12, color: T.soft, marginBottom: 14,
+          }}>
+            Powered by Verathos (Bittensor SN96). ~15% of completed jobs are randomly
+            replayed through cryptographically-verified inference to ensure honest computation.
+          </div>
+          {/* Recent verification history */}
+          {verificationHistory && verificationHistory.length > 0 && (
+            <div>
+              <div className="mono" style={{
+                fontSize: 10, color: T.soft, letterSpacing: "0.12em", marginBottom: 8,
+              }}>
+                RECENT CHECKS
+              </div>
+              {verificationHistory.map((v) => (
+                <div key={v.id} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "8px 0", borderBottom: `1px solid ${T.line}`,
+                  fontSize: 13,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      background: v.verdict === "pass" ? "#16a34a" : v.verdict === "fail" ? "#dc2626" : "#d97706",
+                    }} />
+                    <span style={{
+                      fontWeight: 600, textTransform: "capitalize",
+                      color: v.verdict === "pass" ? "#16a34a" : v.verdict === "fail" ? "#dc2626" : "#d97706",
+                    }}>
+                      {v.verdict}
+                    </span>
+                    {v.similarity_score != null && (
+                      <span style={{ color: T.soft, fontSize: 12 }}>
+                        {(Number(v.similarity_score) * 100).toFixed(1)}% similar
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: T.soft }}>
+                    {new Date(v.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Network Stats */}
       {networkStats && (
         <div style={{
@@ -391,6 +485,14 @@ export default function ComputeDashboard({
               </div>
               <div style={{ fontSize: 10, opacity: 0.6 }}>USDC paid out</div>
             </div>
+            {networkStats.avg_trust_score != null && (
+              <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+                <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#60a5fa" }}>
+                  {Math.round(Number(networkStats.avg_trust_score))}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.6 }}>Avg Trust</div>
+              </div>
+            )}
           </div>
         </div>
       )}
