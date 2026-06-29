@@ -41,6 +41,9 @@ export default function ComputeDashboard({
   networkStats,
   trustScore,
   verificationHistory,
+  shardModels,
+  shardStats,
+  userShardJobs,
 }) {
   const totalJobs = workerStats?.total_jobs || 0;
   const totalUsdc = Number(workerStats?.total_usdc_earned || 0);
@@ -494,6 +497,132 @@ export default function ComputeDashboard({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Shard Frontier Models */}
+      {shardModels && shardModels.length > 0 && (
+        <div style={sectionStyle}>
+          <div className="mono" style={{
+            fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+          }}>
+            SHARD FRONTIER MODELS
+          </div>
+          {shardModels.map((m) => (
+            <div key={m.id} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "10px 0", borderBottom: `1px solid ${T.line}`,
+            }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{m.model_name}</div>
+                {m.description && (
+                  <div style={{ fontSize: 12, color: T.soft, marginTop: 2 }}>{m.description}</div>
+                )}
+              </div>
+              <div style={{
+                fontSize: 10, fontWeight: 700, color: "#16a34a",
+                background: "#dcfce7", padding: "3px 8px", borderRadius: 6,
+                letterSpacing: "0.08em",
+              }}>
+                ACTIVE
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: T.soft, marginTop: 10 }}>
+            Pipeline-parallel inference via Shard distributed GPU network
+          </div>
+        </div>
+      )}
+
+      {/* Shard Network Stats */}
+      {shardStats && (
+        <div style={{
+          ...sectionStyle,
+          background: "#7c3aed",
+          color: T.paper,
+          border: "none",
+        }}>
+          <div className="mono" style={{
+            fontSize: 10, letterSpacing: "0.16em", marginBottom: 12, opacity: 0.5,
+          }}>
+            SHARD NETWORK
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#c4b5fd" }}>
+                {shardStats.jobs_completed || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Jobs completed</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#c4b5fd" }}>
+                {shardStats.avg_latency_ms ? `${shardStats.avg_latency_ms}ms` : "—"}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Avg latency</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#4ade80" }}>
+                {shardStats.receipts_verified || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Receipts verified</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1, minWidth: 60 }}>
+              <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#c4b5fd" }}>
+                {shardStats.models_active || 0}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.6 }}>Models active</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Shard Jobs */}
+      {userShardJobs && userShardJobs.length > 0 && (
+        <div style={sectionStyle}>
+          <div className="mono" style={{
+            fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+          }}>
+            YOUR RECENT SHARD REQUESTS
+          </div>
+          {userShardJobs.map((j) => (
+            <div key={j.id} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "8px 0", borderBottom: `1px solid ${T.line}`,
+              fontSize: 13,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: j.status === "completed" ? "#16a34a" : j.status === "running" ? "#d97706" : "#dc2626",
+                }} />
+                <span style={{ fontWeight: 600 }}>{j.model_name}</span>
+                {j.latency_ms && (
+                  <span style={{ color: T.soft, fontSize: 12 }}>{j.latency_ms}ms</span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {j.receipt_verification_status === "verified" && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: "#16a34a",
+                    background: "#dcfce7", padding: "2px 6px", borderRadius: 4,
+                  }}>
+                    VERIFIED
+                  </span>
+                )}
+                {j.receipt_verification_status === "failed" && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: "#dc2626",
+                    background: "#fef2f2", padding: "2px 6px", borderRadius: 4,
+                  }}>
+                    UNVERIFIED
+                  </span>
+                )}
+                <span style={{ fontSize: 11, color: T.soft }}>
+                  {new Date(j.created_at).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

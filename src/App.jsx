@@ -612,6 +612,9 @@ export default function App() {
           modelProgress={compute.modelProgress}
           trustScore={compute.trustScore}
           verificationHistory={compute.verificationHistory}
+          shardModels={compute.shardModels}
+          shardStats={compute.shardStats}
+          userShardJobs={compute.userShardJobs}
         />
       ) : view === "profile" ? (
         <Profile

@@ -1101,3 +1101,115 @@ select cron.schedule(
   );
   $$
 );
+
+-- ══════════════════════════════════════════════════════════════════
+-- Shard Distributed Inference
+-- ══════════════════════════════════════════════════════════════════
+
+-- Shard models: maps model names to gateway URLs
+create table if not exists shard_models (
+  id uuid primary key default gen_random_uuid(),
+  model_name text unique not null,
+  gateway_url text not null,
+  is_active boolean default true,
+  cost_per_million_tokens numeric(10,4) default 3.0,
+  description text,
+  created_at timestamptz default now()
+);
+
+alter table shard_models enable row level security;
+
+create policy "Shard models are publicly readable" on shard_models
+  for select using (true);
+
+-- Seed rows
+insert into shard_models (model_name, gateway_url, description)
+values
+  ('minimax-m2.5', 'https://shard-gateway.placeholder/v1', 'MiniMax-M2.5 frontier model via Shard distributed inference'),
+  ('shard-default', 'https://shard-gateway.placeholder/v1', 'Default Shard model for general inference')
+on conflict (model_name) do nothing;
+
+-- Shard jobs: tracks Shard inference requests (separate from compute_jobs)
+create table if not exists shard_jobs (
+  id uuid primary key default gen_random_uuid(),
+  buyer_id uuid references users(id),
+  api_key_id uuid,
+  model_name text not null,
+  messages jsonb not null,
+  max_tokens integer,
+  temperature numeric,
+  status text not null default 'pending'
+    check (status in ('pending', 'running', 'completed', 'failed', 'error')),
+  response_text text,
+  response_hash text,
+  shard_receipts jsonb,
+  shard_metadata jsonb,
+  receipt_verification_status text default 'none'
+    check (receipt_verification_status in ('none', 'verified', 'failed')),
+  latency_ms integer,
+  prompt_tokens integer,
+  completion_tokens integer,
+  total_tokens integer,
+  cost_usdc numeric(12,6),
+  error_message text,
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_shard_jobs_buyer on shard_jobs(buyer_id);
+create index if not exists idx_shard_jobs_status on shard_jobs(status);
+create index if not exists idx_shard_jobs_model on shard_jobs(model_name);
+
+alter table shard_jobs enable row level security;
+
+create policy "Buyers read own shard jobs" on shard_jobs
+  for select using (auth.uid() = buyer_id);
+
+-- Shard network stats RPC
+create or replace function shard_network_stats()
+returns jsonb as $$
+declare
+  v_jobs_total integer;
+  v_jobs_completed integer;
+  v_jobs_failed integer;
+  v_avg_latency_ms numeric;
+  v_total_tokens bigint;
+  v_total_cost_usdc numeric(12,6);
+  v_models_active integer;
+  v_receipts_verified integer;
+begin
+  select count(*) into v_jobs_total from shard_jobs;
+
+  select count(*) into v_jobs_completed
+  from shard_jobs where status = 'completed';
+
+  select count(*) into v_jobs_failed
+  from shard_jobs where status in ('failed', 'error');
+
+  select coalesce(avg(latency_ms), 0) into v_avg_latency_ms
+  from shard_jobs where status = 'completed' and latency_ms is not null;
+
+  select coalesce(sum(total_tokens), 0) into v_total_tokens
+  from shard_jobs where status = 'completed';
+
+  select coalesce(sum(cost_usdc), 0) into v_total_cost_usdc
+  from shard_jobs where status = 'completed';
+
+  select count(*) into v_models_active
+  from shard_models where is_active = true;
+
+  select count(*) into v_receipts_verified
+  from shard_jobs where receipt_verification_status = 'verified';
+
+  return jsonb_build_object(
+    'jobs_total', v_jobs_total,
+    'jobs_completed', v_jobs_completed,
+    'jobs_failed', v_jobs_failed,
+    'avg_latency_ms', round(v_avg_latency_ms),
+    'total_tokens', v_total_tokens,
+    'total_cost_usdc', v_total_cost_usdc,
+    'models_active', v_models_active,
+    'receipts_verified', v_receipts_verified
+  );
+end;
+$$ language plpgsql security definer;

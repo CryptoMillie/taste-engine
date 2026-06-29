@@ -74,6 +74,229 @@ async function decrypt(cipherBase64: string, keyHex: string): Promise<string> {
   return new TextDecoder().decode(decrypted);
 }
 
+/** Verify an ed25519-signed Shard receipt. */
+async function verifyShardReceipt(
+  receipt: Record<string, unknown>
+): Promise<boolean> {
+  try {
+    const { sig, pubkey, ...payload } = receipt as Record<string, string>;
+    if (!sig || !pubkey) return false;
+
+    // Build canonical JSON (sorted keys, no whitespace)
+    const canonical = JSON.stringify(
+      Object.keys(payload)
+        .sort()
+        .reduce((acc: Record<string, unknown>, k) => {
+          acc[k] = payload[k];
+          return acc;
+        }, {})
+    );
+
+    const pubkeyBytes = Uint8Array.from(atob(pubkey), (c) => c.charCodeAt(0));
+    const sigBytes = Uint8Array.from(atob(sig), (c) => c.charCodeAt(0));
+    const messageBytes = new TextEncoder().encode(canonical);
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      pubkeyBytes,
+      { name: "Ed25519" },
+      false,
+      ["verify"]
+    );
+
+    return await crypto.subtle.verify("Ed25519", key, sigBytes, messageBytes);
+  } catch {
+    return false;
+  }
+}
+
+/** Handle a Shard gateway inference request. */
+async function handleShardRequest(
+  model: string,
+  messages: unknown[],
+  max_tokens: number,
+  temperature: number,
+  auth: { userId: string; apiKeyId: string | null },
+  supabase: ReturnType<typeof createClient>,
+  gatewayUrl: string,
+  costPerMillionTokens: number
+): Promise<Response> {
+  const startTime = Date.now();
+
+  // Insert pending shard_jobs row
+  const { data: jobData, error: insertErr } = await supabase
+    .from("shard_jobs")
+    .insert({
+      buyer_id: auth.userId,
+      api_key_id: auth.apiKeyId,
+      model_name: model,
+      messages,
+      max_tokens,
+      temperature,
+      status: "running",
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !jobData) {
+    return new Response(
+      JSON.stringify({
+        error: { message: "Failed to create shard job", type: "server_error" },
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const jobId = jobData.id;
+
+  try {
+    // Use SHARD_GATEWAY_URL env var as override, else use DB gateway_url
+    const effectiveGateway =
+      Deno.env.get("SHARD_GATEWAY_URL") || gatewayUrl;
+
+    const gatewayResponse = await fetch(
+      effectiveGateway.replace(/\/+$/, "") + "/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, max_tokens, temperature }),
+      }
+    );
+
+    if (!gatewayResponse.ok) {
+      const errText = await gatewayResponse.text().catch(() => "Unknown error");
+      await supabase
+        .from("shard_jobs")
+        .update({
+          status: "failed",
+          error_message: `Gateway returned ${gatewayResponse.status}: ${errText}`,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: `Shard gateway error: ${gatewayResponse.status}`,
+            type: "server_error",
+          },
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const result = await gatewayResponse.json();
+    const latencyMs = Date.now() - startTime;
+
+    // Extract Shard metadata and receipts
+    const xShard = result.x_shard || null;
+    const receipts: Record<string, unknown>[] = xShard?.receipts || [];
+
+    // Verify all receipts
+    let verificationStatus = "none";
+    if (receipts.length > 0) {
+      const results = await Promise.all(
+        receipts.map((r: Record<string, unknown>) => verifyShardReceipt(r))
+      );
+      verificationStatus = results.every(Boolean) ? "verified" : "failed";
+    }
+
+    // Extract token usage
+    const promptTokens = result.usage?.prompt_tokens || 0;
+    const completionTokens = result.usage?.completion_tokens || 0;
+    const totalTokens = result.usage?.total_tokens || promptTokens + completionTokens;
+
+    // Calculate cost
+    const costUsdc = (totalTokens / 1_000_000) * costPerMillionTokens;
+
+    // Get response text
+    const responseText =
+      result.choices?.[0]?.message?.content || JSON.stringify(result.choices);
+    const responseHash = await sha256(responseText);
+
+    // Update shard_jobs with result
+    await supabase
+      .from("shard_jobs")
+      .update({
+        status: "completed",
+        response_text: responseText,
+        response_hash: responseHash,
+        shard_receipts: receipts.length > 0 ? receipts : null,
+        shard_metadata: xShard,
+        receipt_verification_status: verificationStatus,
+        latency_ms: latencyMs,
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens,
+        cost_usdc: costUsdc,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+
+    // Update API key usage if applicable
+    if (auth.apiKeyId) {
+      const { data: keyData } = await supabase
+        .from("api_keys")
+        .select("usage_count, usage_tokens")
+        .eq("id", auth.apiKeyId)
+        .single();
+
+      if (keyData) {
+        await supabase
+          .from("api_keys")
+          .update({
+            usage_count: (keyData.usage_count || 0) + 1,
+            usage_tokens: (keyData.usage_tokens || 0) + totalTokens,
+          })
+          .eq("id", auth.apiKeyId);
+      }
+    }
+
+    // Return OpenAI-compatible response with x_shard metadata
+    const response = {
+      id: result.id || `chatcmpl-shard-${jobId}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: result.model || model,
+      choices: result.choices || [
+        {
+          index: 0,
+          message: { role: "assistant", content: responseText },
+          finish_reason: "stop",
+        },
+      ],
+      usage: result.usage || {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens,
+      },
+      ...(xShard ? { x_shard: { ...xShard, receipts_ok: verificationStatus === "verified" } } : {}),
+    };
+
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    await supabase
+      .from("shard_jobs")
+      .update({
+        status: "error",
+        error_message: errorMessage,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+
+    return new Response(
+      JSON.stringify({
+        error: { message: `Shard inference failed: ${errorMessage}`, type: "server_error" },
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 /** Resolve user_id from API key or JWT. Returns { userId, apiKeyId } or null. */
 async function resolveAuth(
   req: Request,
@@ -170,6 +393,30 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
+
+  // ── Shard model router ───────────────────────────────────────────
+  if (model) {
+    const { data: shardModel } = await supabase
+      .from("shard_models")
+      .select("model_name, gateway_url, cost_per_million_tokens")
+      .eq("model_name", model)
+      .eq("is_active", true)
+      .single();
+
+    if (shardModel) {
+      return handleShardRequest(
+        model,
+        messages,
+        max_tokens,
+        temperature,
+        auth,
+        supabase,
+        shardModel.gateway_url,
+        Number(shardModel.cost_per_million_tokens) || 3.0
+      );
+    }
+  }
+  // ── Fall through to WebLLM path ──────────────────────────────────
 
   // ── Check workers online ─────────────────────────────────────────
   const { data: netStats } = await supabase.rpc("compute_network_stats");

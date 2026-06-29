@@ -215,6 +215,49 @@ export async function fetchNetworkStats() {
   }
 }
 
+/** Fetch active Shard models. */
+export async function fetchShardModels() {
+  if (!supabase) return [];
+  try {
+    const { data } = await supabase
+      .from("shard_models")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+/** Fetch Shard network stats via RPC. */
+export async function fetchShardStats() {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.rpc("shard_network_stats");
+    if (error) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch recent Shard jobs for a user. */
+export async function fetchUserShardJobs(userId, limit = 5) {
+  if (!supabase || !userId) return [];
+  try {
+    const { data } = await supabase
+      .from("shard_jobs")
+      .select("id, model_name, status, latency_ms, total_tokens, cost_usdc, receipt_verification_status, created_at")
+      .eq("buyer_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
 /** Initialize membership for a user (free tier + 48hr trial). */
 export async function initMembership(userId) {
   if (!supabase || !userId) return null;

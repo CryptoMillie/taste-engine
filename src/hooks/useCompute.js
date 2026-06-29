@@ -11,6 +11,9 @@ import {
   initMembership,
   fetchNetworkStats,
   fetchVerificationHistory,
+  fetchShardModels,
+  fetchShardStats,
+  fetchUserShardJobs,
   classifyGpu,
   EARNINGS_RATES,
 } from "../api/compute";
@@ -40,6 +43,9 @@ export function useCompute(userId) {
   const [modelProgress, setModelProgress] = useState(0);
   const [trustScore, setTrustScore] = useState(null);
   const [verificationHistory, setVerificationHistory] = useState([]);
+  const [shardModels, setShardModels] = useState([]);
+  const [shardStats, setShardStats] = useState(null);
+  const [userShardJobs, setUserShardJobs] = useState([]);
 
   const workerIdRef = useRef(null);
   const gpuWorkerRef = useRef(null);
@@ -76,11 +82,23 @@ export function useCompute(userId) {
   }, []);
 
   const refreshStats = useCallback(async () => {
-    if (!userId) return;
-    const [stats, mem, net] = await Promise.all([
+    if (!userId) {
+      // Still fetch public Shard data without userId
+      const [sModels, sStats] = await Promise.all([
+        fetchShardModels(),
+        fetchShardStats(),
+      ]);
+      setShardModels(sModels);
+      if (sStats) setShardStats(sStats);
+      return;
+    }
+    const [stats, mem, net, sModels, sStats, sJobs] = await Promise.all([
       fetchWorkerStats(userId),
       fetchMembership(userId),
       fetchNetworkStats(),
+      fetchShardModels(),
+      fetchShardStats(),
+      fetchUserShardJobs(userId),
     ]);
     if (stats) {
       setWorkerStats(stats);
@@ -98,6 +116,9 @@ export function useCompute(userId) {
     }
     if (mem) setMembership(mem);
     if (net) setNetworkStats(net);
+    setShardModels(sModels);
+    if (sStats) setShardStats(sStats);
+    setUserShardJobs(sJobs);
   }, [userId]);
 
   // Fetch stats on mount (and network stats even without userId)
@@ -319,6 +340,9 @@ export function useCompute(userId) {
     modelProgress,
     trustScore,
     verificationHistory,
+    shardModels,
+    shardStats,
+    userShardJobs,
     refreshStats,
   };
 }
