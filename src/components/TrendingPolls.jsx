@@ -261,23 +261,32 @@ function PollCard({ poll, voteData, onSelect, isLive }) {
 }
 
 
-export default function TrendingPolls({ polls, onSelectPoll }) {
+export default function TrendingPolls({ polls, onSelectPoll, userPrefs }) {
   const [activeCategory, setActiveCategory] = useState("All");
   const [liveMatchups, setLiveMatchups] = useState([]);
   const [liveLoading, setLiveLoading] = useState(true);
   const votedPolls = getVotedPolls();
 
   useEffect(() => {
+    // Timeout guard: never show loading spinner for more than 8 seconds
+    const timeout = setTimeout(() => {
+      setLiveLoading(false);
+      console.warn("[TrendingPolls] live fetch timed out after 8s");
+    }, 8000);
+
     fetchLiveTrending()
       .then((matchups) => {
         if (matchups.length > 0) {
           setLiveMatchups(matchups);
-          setLiveLoading(false);
           return;
         }
+        console.log("[TrendingPolls] Supabase returned 0 live items, falling back to DeSearch");
         // Supabase returned nothing — fall back to client-side DeSearch
         return fetchTrendingFromDesearch().then((entities) => {
-          if (!entities.length) return;
+          if (!entities.length) {
+            console.log("[TrendingPolls] DeSearch fallback returned 0 entities");
+            return;
+          }
           // Group by category then pair adjacent entities into matchups
           const byCategory = {};
           for (const ent of entities) {
@@ -302,8 +311,11 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
           setLiveMatchups(fallbackMatchups);
         });
       })
-      .catch(() => {})
-      .finally(() => setLiveLoading(false));
+      .catch((err) => console.error("[TrendingPolls] live fetch error:", err))
+      .finally(() => {
+        clearTimeout(timeout);
+        setLiveLoading(false);
+      });
   }, []);
 
   // Convert live matchups to poll-like objects
@@ -335,26 +347,42 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
       ? livePolls
       : livePolls.filter((p) => p.category.toLowerCase() === activeCategory.toLowerCase());
 
+  // Build category affinity scores from user voting history
+  // Maps poll categories (title-case) to a 0-1 affinity score
+  const catAffinity = {};
+  if (userPrefs?.catWins && userPrefs?.catSeen) {
+    for (const [cat, seen] of Object.entries(userPrefs.catSeen)) {
+      const wins = userPrefs.catWins[cat] || 0;
+      catAffinity[cat] = seen > 0 ? wins / seen : 0;
+    }
+  }
+  // Lookup: normalize poll category to lowercase store category for matching
+  const getAffinity = (pollCategory) => {
+    const key = pollCategory.toLowerCase();
+    return catAffinity[key] || 0;
+  };
+
   // Weighted merge: live/trending polls get priority, curated fill gaps
-  // Live polls score higher so they float to the top of the grid
+  // User affinity boosts polls in categories the user votes for most
   const scored = [];
 
-  // Live polls get a high base weight (recency-boosted)
+  // Live polls get a high base weight (recency-boosted + affinity-boosted)
   filteredLive.forEach((p, i) => {
-    // Newer live matchups score higher (index 0 = most recent from DB)
     const recencyBoost = Math.max(0, 10 - i);
-    scored.push({ poll: p, weight: 100 + recencyBoost });
+    const affinityBoost = getAffinity(p.category) * 30;
+    scored.push({ poll: p, weight: 100 + recencyBoost + affinityBoost });
   });
 
   // Curated polls get a lower base weight, shuffled so it's not the same order every time
+  // Affinity boost surfaces preferred categories higher
   const shuffled = [...filteredCurated];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    // Deterministic daily shuffle: same order within a day, fresh next day
     const seed = (new Date().getDate() * 31 + i * 7) % (i + 1);
     [shuffled[i], shuffled[seed]] = [shuffled[seed], shuffled[i]];
   }
   shuffled.forEach((p, i) => {
-    scored.push({ poll: p, weight: 50 - i * 0.5 });
+    const affinityBoost = getAffinity(p.category) * 40;
+    scored.push({ poll: p, weight: 50 - i * 0.5 + affinityBoost });
   });
 
   // Sort by weight descending — live/trending content surfaces first

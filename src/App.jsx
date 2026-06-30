@@ -577,7 +577,7 @@ export default function App() {
           </p>
         </main>
       ) : view === "polls" ? (
-        <TrendingPolls polls={POLLS} onSelectPoll={handleSelectPoll} />
+        <TrendingPolls polls={POLLS} onSelectPoll={handleSelectPoll} userPrefs={store.current.getPrefs()} />
       ) : view === "pollArena" && activePoll ? (
         <PollArena poll={activePoll} onVote={handlePollVote} onBack={handlePollBack} />
       ) : view === "speedRound" ? (
