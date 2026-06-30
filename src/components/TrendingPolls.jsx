@@ -3,6 +3,7 @@ import { T } from "../theme";
 import { POLL_CATEGORIES } from "../data/polls";
 import { fetchHeadToHead } from "../api/stats";
 import { fetchLiveTrending } from "../api/trending";
+import { fetchTrendingFromDesearch } from "../api/desearch";
 
 const VOTED_KEY = "taste-polls-voted";
 
@@ -268,19 +269,56 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
 
   useEffect(() => {
     fetchLiveTrending()
-      .then(setLiveMatchups)
+      .then((matchups) => {
+        if (matchups.length > 0) {
+          setLiveMatchups(matchups);
+          setLiveLoading(false);
+          return;
+        }
+        // Supabase returned nothing — fall back to client-side DeSearch
+        return fetchTrendingFromDesearch().then((entities) => {
+          if (!entities.length) return;
+          // Group by category then pair adjacent entities into matchups
+          const byCategory = {};
+          for (const ent of entities) {
+            const cat = ent.cat || "trending";
+            if (!byCategory[cat]) byCategory[cat] = [];
+            byCategory[cat].push(ent);
+          }
+          const fallbackMatchups = [];
+          for (const [cat, items] of Object.entries(byCategory)) {
+            for (let i = 0; i + 1 < items.length; i += 2) {
+              const a = items[i];
+              const b = items[i + 1];
+              fallbackMatchups.push({
+                id: `ds_${a.name}_${b.name}`.replace(/\s+/g, "_").toLowerCase(),
+                itemA: { id: a.name.toLowerCase().replace(/\s+/g, "-"), name: a.name, sub: a.sub, cat, img: a.img },
+                itemB: { id: b.name.toLowerCase().replace(/\s+/g, "-"), name: b.name, sub: b.sub, cat, img: b.img },
+                category: cat,
+                refreshedAt: new Date().toISOString(),
+              });
+            }
+          }
+          setLiveMatchups(fallbackMatchups);
+        });
+      })
+      .catch(() => {})
       .finally(() => setLiveLoading(false));
   }, []);
 
   // Convert live matchups to poll-like objects
-  const livePolls = liveMatchups.map((m) => ({
-    id: m.id,
-    itemA: m.itemA,
-    itemB: m.itemB,
-    category: m.category,
-    label: `${m.itemA.name} vs ${m.itemB.name}`,
-    _isLive: true,
-  }));
+  // Capitalize category to match curated pill labels (e.g. "sports" → "Sports")
+  const livePolls = liveMatchups.map((m) => {
+    const cat = m.category || "trending";
+    return {
+      id: m.id,
+      itemA: m.itemA,
+      itemB: m.itemB,
+      category: cat.charAt(0).toUpperCase() + cat.slice(1),
+      label: `${m.itemA.name} vs ${m.itemB.name}`,
+      _isLive: true,
+    };
+  });
 
   // Filter curated polls by category (unless "Live" is selected)
   const filteredCurated =
@@ -291,10 +329,11 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
         : polls.filter((p) => p.category === activeCategory);
 
   // Filter live polls — show all for "All" or "Live", otherwise match category
+  // Live poll categories are lowercase from DeSearch, filter pills are title-case
   const filteredLive =
     activeCategory === "All" || activeCategory === "Live"
       ? livePolls
-      : livePolls.filter((p) => p.category === activeCategory);
+      : livePolls.filter((p) => p.category.toLowerCase() === activeCategory.toLowerCase());
 
   // Weighted merge: live/trending polls get priority, curated fill gaps
   // Live polls score higher so they float to the top of the grid
@@ -402,23 +441,35 @@ export default function TrendingPolls({ polls, onSelectPoll }) {
       </div>
 
       {/* 2-column grid with interleaved live matchups */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 18,
-        }}
-      >
-        {combined.map((poll) => (
-          <PollCard
-            key={poll.id}
-            poll={poll}
-            voteData={votedPolls[poll.id] || null}
-            onSelect={onSelectPoll}
-            isLive={!!poll._isLive}
-          />
-        ))}
-      </div>
+      {activeCategory === "Live" && liveLoading ? (
+        <p className="mono" style={{ textAlign: "center", color: T.soft, fontSize: 12, padding: 40 }}>
+          LOADING LIVE MATCHUPS...
+        </p>
+      ) : combined.length === 0 ? (
+        <p className="mono" style={{ textAlign: "center", color: T.soft, fontSize: 12, padding: 40 }}>
+          {activeCategory === "Live"
+            ? "NO LIVE MATCHUPS YET — CHECK BACK SOON"
+            : `NO POLLS FOR ${activeCategory.toUpperCase()}`}
+        </p>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+            gap: 18,
+          }}
+        >
+          {combined.map((poll) => (
+            <PollCard
+              key={poll.id}
+              poll={poll}
+              voteData={votedPolls[poll.id] || null}
+              onSelect={onSelectPoll}
+              isLive={!!poll._isLive}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
