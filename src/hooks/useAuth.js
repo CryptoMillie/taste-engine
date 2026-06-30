@@ -160,43 +160,20 @@ export function useAuth() {
 
   const signInWithGoogle = async () => {
     if (!supabase) return;
-    try {
-      // If anonymous, link identity to preserve session; otherwise fresh OAuth
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.is_anonymous) {
-        await supabase.auth.linkIdentity({
-          provider: "google",
-          options: { redirectTo: window.location.origin },
-        });
-      } else {
-        await supabase.auth.signInWithOAuth({
-          provider: "google",
-          options: { redirectTo: window.location.origin },
-        });
-      }
-    } catch (err) {
-      console.error("Google sign-in failed:", err);
-    }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) console.error("Google sign-in failed:", error.message);
   };
 
   const signInWithTwitter = async () => {
     if (!supabase) return;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.is_anonymous) {
-        await supabase.auth.linkIdentity({
-          provider: "twitter",
-          options: { redirectTo: window.location.origin },
-        });
-      } else {
-        await supabase.auth.signInWithOAuth({
-          provider: "twitter",
-          options: { redirectTo: window.location.origin },
-        });
-      }
-    } catch (err) {
-      console.error("Twitter sign-in failed:", err);
-    }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "twitter",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) console.error("Twitter sign-in failed:", error.message);
   };
 
   const upgradeAnonymous = async (provider) => {
