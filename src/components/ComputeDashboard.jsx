@@ -46,6 +46,11 @@ export default function ComputeDashboard({
   shardModels,
   shardStats,
   userShardJobs,
+  pipelineMode,
+  pipelineStatus,
+  pipelineInfo,
+  pipelineSlots,
+  togglePipeline,
 }) {
   const [rlhfStats, setRlhfStats] = useState({ highQualityVotes: 0, dividendsEarned: 0, optedIn: true });
   useEffect(() => {
@@ -153,26 +158,31 @@ export default function ComputeDashboard({
       <div style={{ ...sectionStyle, textAlign: "center" }}>
         <button
           onClick={toggle}
-          disabled={starting}
+          disabled={starting || pipelineMode}
           style={{
             width: "100%",
-            background: starting ? T.soft : enabled ? T.pop : "#16a34a",
+            background: starting || pipelineMode ? T.soft : enabled ? T.pop : "#16a34a",
             color: T.paper,
             border: "none",
             padding: "18px 24px",
             borderRadius: 14,
             fontSize: 18,
             fontWeight: 700,
-            cursor: starting ? "wait" : "pointer",
+            cursor: starting || pipelineMode ? "wait" : "pointer",
             transition: "background 0.2s",
-            opacity: starting ? 0.7 : 1,
+            opacity: starting || pipelineMode ? 0.7 : 1,
           }}
         >
-          {starting ? "Connecting..." : enabled ? "Stop Earning" : "Start Earning"}
+          {pipelineMode ? "Pipeline mode active" : starting ? "Connecting..." : enabled ? "Stop Earning" : "Start Earning"}
         </button>
-        {!enabled && !starting && !error && (
+        {!enabled && !starting && !error && !pipelineMode && (
           <div style={{ fontSize: 12, color: T.soft, marginTop: 8 }}>
             Runs in the background while you browse. Stop anytime.
+          </div>
+        )}
+        {pipelineMode && (
+          <div style={{ fontSize: 12, color: T.soft, marginTop: 8 }}>
+            Leave pipeline mode to use solo earning.
           </div>
         )}
         {error && (
@@ -447,6 +457,160 @@ export default function ComputeDashboard({
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Pipeline Inference */}
+      {gpuAvailable && (gpuClass === "mid" || gpuClass === "high") && (
+        <div style={sectionStyle}>
+          <div className="mono" style={{
+            fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+          }}>
+            PIPELINE INFERENCE
+          </div>
+
+          {!pipelineMode ? (
+            <>
+              <div style={{ fontSize: 13, color: T.soft, marginBottom: 14, lineHeight: 1.5 }}>
+                Join a pipeline to collaboratively run 8B+ models across multiple browsers.
+                Higher earnings per job ($0.004 split across workers).
+              </div>
+              <button
+                onClick={togglePipeline}
+                disabled={enabled || !userId}
+                style={{
+                  width: "100%",
+                  background: enabled ? T.soft : "#059669",
+                  color: T.paper,
+                  border: "none",
+                  padding: "14px 24px",
+                  borderRadius: 12,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  cursor: enabled ? "not-allowed" : "pointer",
+                  opacity: enabled ? 0.5 : 1,
+                }}
+              >
+                {enabled ? "Stop solo mode first" : "Join Pipeline"}
+              </button>
+              {enabled && (
+                <div style={{ fontSize: 11, color: T.soft, marginTop: 6 }}>
+                  Stop solo earning before joining a pipeline.
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Pipeline status indicator */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10,
+                marginBottom: 14, padding: "12px 14px",
+                background: pipelineStatus === "ready" ? "#dcfce7" :
+                  pipelineStatus === "processing" ? "#dbeafe" :
+                  pipelineStatus === "loading" ? "#fef9c3" : T.paper,
+                borderRadius: 12,
+              }}>
+                <div style={{
+                  width: 10, height: 10, borderRadius: "50%",
+                  background: pipelineStatus === "ready" ? "#16a34a" :
+                    pipelineStatus === "processing" ? "#2563eb" :
+                    pipelineStatus === "loading" ? "#d97706" : T.soft,
+                  animation: pipelineStatus === "processing" ? "pulse 1s ease infinite" : "none",
+                }} />
+                <div style={{ fontSize: 14, fontWeight: 600 }}>
+                  {pipelineStatus === "joining" ? "Joining pipeline..." :
+                   pipelineStatus === "loading" ? "Loading weight shard..." :
+                   pipelineStatus === "ready" ? "Pipeline Ready" :
+                   pipelineStatus === "processing" ? "Processing pipeline job..." :
+                   "Pipeline"}
+                </div>
+              </div>
+
+              {/* Stage assignment */}
+              {pipelineInfo && (
+                <div style={{
+                  padding: "10px 14px", background: T.paper, borderRadius: 10,
+                  fontSize: 13, marginBottom: 12,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    Stage {pipelineInfo.stageIndex + 1} of {pipelineInfo.totalStages}
+                  </div>
+                  <div style={{ color: T.soft, fontSize: 12 }}>
+                    Layers {pipelineInfo.layerStart}–{pipelineInfo.layerEnd - 1}
+                    {pipelineInfo.stageIndex === 0 && " (embedding + first layers)"}
+                    {pipelineInfo.stageIndex === pipelineInfo.totalStages - 1 && " (final layers + LM head)"}
+                  </div>
+                </div>
+              )}
+
+              {/* Shard loading progress */}
+              {pipelineStatus === "loading" && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{
+                    width: "100%", height: 8, background: T.line,
+                    borderRadius: 4, overflow: "hidden", marginBottom: 6,
+                  }}>
+                    <div style={{
+                      width: `${modelProgress}%`, height: "100%",
+                      background: "#d97706", borderRadius: 4,
+                      transition: "width 0.3s ease",
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: T.soft }}>
+                    Downloading & loading weights... {modelProgress}%
+                  </div>
+                </div>
+              )}
+
+              {/* Slots visualization */}
+              {pipelineSlots.length > 0 && (
+                <div style={{
+                  display: "flex", gap: 8, marginBottom: 14,
+                  justifyContent: "center",
+                }}>
+                  {pipelineSlots.map((slot, i) => (
+                    <div key={i} style={{
+                      display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                    }}>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: "50%",
+                        background: slot.status === "ready" ? "#16a34a" :
+                          slot.status === "processing" ? "#2563eb" :
+                          slot.status === "loading" ? "#d97706" :
+                          slot.status === "failed" ? "#dc2626" : T.line,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: slot.worker_id ? T.paper : T.soft,
+                        fontSize: 12, fontWeight: 700,
+                      }}>
+                        {i + 1}
+                      </div>
+                      <div style={{ fontSize: 9, color: T.soft }}>
+                        {slot.status === "vacant" ? "Empty" : slot.status}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Leave pipeline button */}
+              <button
+                onClick={togglePipeline}
+                style={{
+                  width: "100%",
+                  background: T.pop,
+                  color: T.paper,
+                  border: "none",
+                  padding: "12px 24px",
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Leave Pipeline
+              </button>
+            </>
           )}
         </div>
       )}

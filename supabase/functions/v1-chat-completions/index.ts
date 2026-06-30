@@ -305,6 +305,143 @@ async function handleShardRequest(
   }
 }
 
+/** Handle a pipeline inference request (layer-sharded multi-worker). */
+async function handlePipelineRequest(
+  pipeline: { id: string; model_name: string; total_stages: number },
+  messages: unknown[],
+  max_tokens: number,
+  temperature: number,
+  auth: { userId: string; apiKeyId: string | null },
+  supabase: ReturnType<typeof createClient>,
+  encryptionKey: string
+): Promise<Response> {
+  // Encrypt payload
+  const payloadStr = JSON.stringify({ messages, max_tokens, temperature });
+  const [payloadEncrypted, payloadHash] = await Promise.all([
+    encrypt(payloadStr, encryptionKey),
+    sha256(payloadStr),
+  ]);
+
+  // Insert pipeline job
+  const { data: jobData, error: insertErr } = await supabase
+    .from("pipeline_jobs")
+    .insert({
+      pipeline_id: pipeline.id,
+      buyer_id: auth.userId,
+      payload_encrypted: payloadEncrypted,
+      payload_hash: payloadHash,
+      coins_reward: 40,
+      usdc_reward: 0.004,
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !jobData) {
+    return new Response(
+      JSON.stringify({ error: { message: "Failed to submit pipeline job", type: "server_error" } }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const jobId = jobData.id;
+
+  // Poll for completion (longer timeout — pipeline has multiple stages)
+  const POLL_INTERVAL = 500;
+  const TIMEOUT = 120000;
+  const start = Date.now();
+
+  while (Date.now() - start < TIMEOUT) {
+    await sleep(POLL_INTERVAL);
+
+    const { data: job } = await supabase
+      .from("pipeline_jobs")
+      .select("status, result_encrypted, completed_at")
+      .eq("id", jobId)
+      .single();
+
+    if (!job) break;
+
+    if (job.status === "completed" && job.result_encrypted) {
+      // Decrypt result
+      let resultStr: string;
+      try {
+        resultStr = await decrypt(job.result_encrypted, encryptionKey);
+      } catch {
+        try {
+          resultStr = atob(job.result_encrypted);
+        } catch {
+          resultStr = job.result_encrypted;
+        }
+      }
+
+      let result: any;
+      try {
+        result = JSON.parse(resultStr);
+      } catch {
+        result = { choices: [{ message: { role: "assistant", content: resultStr } }] };
+      }
+
+      // Update API key usage
+      if (auth.apiKeyId) {
+        const totalTokens = result.usage?.total_tokens || 0;
+        const { data: keyData } = await supabase
+          .from("api_keys")
+          .select("usage_count, usage_tokens")
+          .eq("id", auth.apiKeyId)
+          .single();
+        if (keyData) {
+          await supabase
+            .from("api_keys")
+            .update({
+              usage_count: (keyData.usage_count || 0) + 1,
+              usage_tokens: (keyData.usage_tokens || 0) + totalTokens,
+            })
+            .eq("id", auth.apiKeyId);
+        }
+      }
+
+      const response = {
+        id: result.id || `chatcmpl-pipeline-${jobId}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: pipeline.model_name,
+        choices: result.choices || [
+          {
+            index: 0,
+            message: { role: "assistant", content: typeof result === "string" ? result : JSON.stringify(result) },
+            finish_reason: "stop",
+          },
+        ],
+        usage: result.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        x_pipeline: {
+          pipeline_id: pipeline.id,
+          model: pipeline.model_name,
+          stages: pipeline.total_stages,
+        },
+      };
+
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (job.status === "failed" || job.status === "expired") {
+      return new Response(
+        JSON.stringify({ error: { message: `Pipeline job ${job.status}`, type: "server_error" } }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+  }
+
+  // Timeout
+  return new Response(
+    JSON.stringify({ error: { message: "Pipeline request timed out.", type: "server_error" } }),
+    { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "30" } }
+  );
+}
+
 /** Resolve user_id from API key or JWT. Returns { userId, apiKeyId } or null. */
 async function resolveAuth(
   req: Request,
@@ -423,6 +560,18 @@ Deno.serve(async (req) => {
         Number(shardModel.cost_per_million_tokens) || 3.0
       );
     }
+  }
+  // ── Pipeline routing ────────────────────────────────────────────
+  // Check for a ready pipeline before falling through to solo WebLLM path
+  const { data: pipeline } = await supabase
+    .from("compute_pipelines")
+    .select("id, model_name, total_stages")
+    .eq("status", "ready")
+    .limit(1)
+    .single();
+
+  if (pipeline) {
+    return handlePipelineRequest(pipeline, messages, max_tokens, temperature, auth, supabase, encryptionKey);
   }
   // ── Fall through to WebLLM path ──────────────────────────────────
 

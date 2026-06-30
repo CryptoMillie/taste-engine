@@ -415,6 +415,9 @@ begin
 end;
 $$ language plpgsql security definer;
 
+-- Notify PostgREST to reload schema cache (needed after creating/replacing functions)
+notify pgrst, 'reload schema';
+
 -- Increment market votes RPC
 create or replace function increment_market_votes(
   p_market_id uuid,
@@ -1362,6 +1365,560 @@ alter table shard_jobs enable row level security;
 create policy "Buyers read own shard jobs" on shard_jobs
   for select using (auth.uid() = buyer_id);
 
+-- ══════════════════════════════════════════════════════════════════
+-- Layer-Sharded Pipeline Inference
+-- Coordinates N browser workers to collectively serve 8B+ models
+-- by splitting the model across workers in a pipeline.
+-- All additive — no existing tables or RPCs are modified.
+-- ══════════════════════════════════════════════════════════════════
+
+-- Pipeline: a group of workers collectively serving a model
+create table if not exists compute_pipelines (
+  id uuid primary key default gen_random_uuid(),
+  model_name text not null,
+  total_stages integer not null default 4,
+  status text not null default 'forming'
+    check (status in ('forming', 'ready', 'processing', 'draining', 'dissolved')),
+  formed_at timestamptz,
+  last_activity timestamptz default now(),
+  config jsonb default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_pipelines_status on compute_pipelines(status);
+create index if not exists idx_pipelines_model on compute_pipelines(model_name);
+
+alter table compute_pipelines enable row level security;
+create policy "Pipelines are publicly readable" on compute_pipelines
+  for select using (true);
+
+-- Pipeline slots: one per stage, assigned to a worker
+create table if not exists pipeline_slots (
+  id uuid primary key default gen_random_uuid(),
+  pipeline_id uuid not null references compute_pipelines(id) on delete cascade,
+  stage_index integer not null,
+  worker_id uuid references compute_workers(id),
+  layer_start integer not null,
+  layer_end integer not null,
+  status text not null default 'vacant'
+    check (status in ('vacant', 'loading', 'ready', 'processing', 'failed')),
+  last_heartbeat timestamptz default now(),
+  created_at timestamptz default now(),
+  constraint pipeline_slots_unique unique (pipeline_id, stage_index)
+);
+
+create index if not exists idx_pipeline_slots_pipeline on pipeline_slots(pipeline_id);
+create index if not exists idx_pipeline_slots_worker on pipeline_slots(worker_id);
+
+alter table pipeline_slots enable row level security;
+create policy "Pipeline slots are publicly readable" on pipeline_slots
+  for select using (true);
+
+-- Pipeline columns on compute_workers (purely additive)
+alter table compute_workers add column if not exists pipeline_id uuid references compute_pipelines(id);
+alter table compute_workers add column if not exists pipeline_stage integer;
+alter table compute_workers add column if not exists mode text default 'solo'
+  check (mode in ('solo', 'pipeline'));
+
+-- Pipeline jobs: inference jobs routed to pipelines
+create table if not exists pipeline_jobs (
+  id uuid primary key default gen_random_uuid(),
+  pipeline_id uuid not null references compute_pipelines(id),
+  buyer_id uuid references users(id),
+  payload_encrypted text not null,
+  payload_hash text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'stage_0', 'stage_1', 'stage_2', 'stage_3', 'completed', 'failed', 'expired')),
+  current_stage integer default 0,
+  result_encrypted text,
+  result_hash text,
+  coins_reward integer not null default 40,
+  usdc_reward numeric(12,6) not null default 0.004,
+  expires_at timestamptz default now() + interval '10 minutes',
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_pipeline_jobs_pipeline on pipeline_jobs(pipeline_id);
+create index if not exists idx_pipeline_jobs_status on pipeline_jobs(status);
+create index if not exists idx_pipeline_jobs_buyer on pipeline_jobs(buyer_id);
+
+alter table pipeline_jobs enable row level security;
+create policy "Buyers read own pipeline jobs" on pipeline_jobs
+  for select using (auth.uid() = buyer_id);
+
+-- Pipeline activations: intermediate tensors passed between stages
+create table if not exists pipeline_activations (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references pipeline_jobs(id) on delete cascade,
+  from_stage integer not null,
+  to_stage integer not null,
+  activation_data text not null,
+  activation_hash text not null,
+  consumed_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_pipeline_activations_job_stage on pipeline_activations(job_id, to_stage);
+
+alter table pipeline_activations enable row level security;
+create policy "Pipeline activations readable by pipeline workers" on pipeline_activations
+  for select using (true);
+
+-- ── join_pipeline RPC ───────────────────────────────────────────────
+-- Finds or creates a pipeline and assigns the worker to a vacant slot.
+create or replace function join_pipeline(
+  p_worker_id uuid,
+  p_model_name text
+) returns jsonb as $$
+declare
+  v_pipeline_id uuid;
+  v_slot record;
+  v_total_stages integer := 4;
+  v_layers_per_stage integer := 8; -- 32 total layers / 4 stages
+  v_total_layers integer := 32;
+  v_config jsonb;
+  v_all_filled boolean;
+begin
+  -- Look for an existing forming pipeline with a vacant slot
+  select p.id, p.total_stages, p.config
+  into v_pipeline_id, v_total_stages, v_config
+  from compute_pipelines p
+  where p.model_name = p_model_name
+    and p.status = 'forming'
+  limit 1
+  for update skip locked;
+
+  -- Create a new pipeline if none found
+  if v_pipeline_id is null then
+    v_config := jsonb_build_object(
+      'total_layers', v_total_layers,
+      'layers_per_stage', v_layers_per_stage,
+      'hidden_dim', 4096,
+      'ffn_dim', 14336,
+      'n_heads', 32,
+      'kv_heads', 8,
+      'head_dim', 128,
+      'vocab_size', 128256,
+      'max_seq_len', 2048
+    );
+
+    insert into compute_pipelines (model_name, total_stages, status, config)
+    values (p_model_name, v_total_stages, 'forming', v_config)
+    returning id into v_pipeline_id;
+
+    -- Create all slots
+    for i in 0..(v_total_stages - 1) loop
+      insert into pipeline_slots (pipeline_id, stage_index, layer_start, layer_end, status)
+      values (
+        v_pipeline_id,
+        i,
+        i * v_layers_per_stage,
+        (i + 1) * v_layers_per_stage,
+        'vacant'
+      );
+    end loop;
+  end if;
+
+  -- Claim first vacant slot
+  select * into v_slot
+  from pipeline_slots
+  where pipeline_id = v_pipeline_id
+    and status = 'vacant'
+    and worker_id is null
+  order by stage_index
+  limit 1
+  for update skip locked;
+
+  if v_slot is null then
+    raise exception 'No vacant slots available';
+  end if;
+
+  -- Assign worker to slot
+  update pipeline_slots
+  set worker_id = p_worker_id,
+      status = 'loading',
+      last_heartbeat = now()
+  where id = v_slot.id;
+
+  -- Update worker
+  update compute_workers
+  set mode = 'pipeline',
+      pipeline_id = v_pipeline_id,
+      pipeline_stage = v_slot.stage_index
+  where id = p_worker_id;
+
+  -- Check if all slots are now filled
+  select not exists(
+    select 1 from pipeline_slots
+    where pipeline_id = v_pipeline_id
+      and worker_id is null
+  ) into v_all_filled;
+
+  if v_all_filled then
+    update compute_pipelines
+    set status = 'ready',
+        formed_at = now()
+    where id = v_pipeline_id;
+  end if;
+
+  return jsonb_build_object(
+    'pipeline_id', v_pipeline_id,
+    'stage_index', v_slot.stage_index,
+    'layer_start', v_slot.layer_start,
+    'layer_end', v_slot.layer_end,
+    'total_stages', v_total_stages,
+    'config', v_config
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── leave_pipeline RPC ──────────────────────────────────────────────
+create or replace function leave_pipeline(
+  p_worker_id uuid
+) returns void as $$
+declare
+  v_pipeline_id uuid;
+  v_stage integer;
+begin
+  -- Get worker's pipeline info
+  select pipeline_id, pipeline_stage
+  into v_pipeline_id, v_stage
+  from compute_workers
+  where id = p_worker_id and mode = 'pipeline';
+
+  if v_pipeline_id is null then
+    return; -- not in a pipeline
+  end if;
+
+  -- Clear the slot
+  update pipeline_slots
+  set worker_id = null,
+      status = 'vacant'
+  where pipeline_id = v_pipeline_id
+    and stage_index = v_stage;
+
+  -- Reset worker
+  update compute_workers
+  set mode = 'solo',
+      pipeline_id = null,
+      pipeline_stage = null,
+      status = 'idle'
+  where id = p_worker_id;
+
+  -- If pipeline was ready, transition to draining
+  update compute_pipelines
+  set status = 'draining'
+  where id = v_pipeline_id
+    and status in ('ready', 'processing');
+
+  -- Fail any in-progress pipeline jobs
+  update pipeline_jobs
+  set status = 'failed'
+  where pipeline_id = v_pipeline_id
+    and status not in ('completed', 'failed', 'expired');
+end;
+$$ language plpgsql security definer;
+
+-- ── claim_pipeline_stage RPC ────────────────────────────────────────
+-- Stage 0: claims oldest pending job. Stages 1+: returns job data if activation exists.
+create or replace function claim_pipeline_stage(
+  p_pipeline_id uuid,
+  p_stage_index integer
+) returns jsonb as $$
+declare
+  v_job record;
+  v_activation record;
+begin
+  if p_stage_index = 0 then
+    -- Stage 0: claim oldest pending pipeline job
+    select * into v_job
+    from pipeline_jobs
+    where pipeline_id = p_pipeline_id
+      and status = 'pending'
+      and expires_at > now()
+    order by created_at asc
+    limit 1
+    for update skip locked;
+
+    if v_job is null then
+      return null;
+    end if;
+
+    update pipeline_jobs
+    set status = 'stage_0',
+        current_stage = 0
+    where id = v_job.id;
+
+    return jsonb_build_object(
+      'job_id', v_job.id,
+      'payload_encrypted', v_job.payload_encrypted,
+      'payload_hash', v_job.payload_hash,
+      'coins_reward', v_job.coins_reward,
+      'usdc_reward', v_job.usdc_reward
+    );
+  else
+    -- Stages 1+: check for available activation
+    select pa.*, pj.id as job_id, pj.payload_encrypted, pj.coins_reward, pj.usdc_reward
+    into v_activation
+    from pipeline_activations pa
+    join pipeline_jobs pj on pj.id = pa.job_id
+    where pa.to_stage = p_stage_index
+      and pa.consumed_at is null
+      and pj.pipeline_id = p_pipeline_id
+    order by pa.created_at asc
+    limit 1
+    for update of pa skip locked;
+
+    if v_activation is null then
+      return null;
+    end if;
+
+    -- Mark activation consumed
+    update pipeline_activations
+    set consumed_at = now()
+    where id = v_activation.id;
+
+    return jsonb_build_object(
+      'job_id', v_activation.job_id,
+      'activation_data', v_activation.activation_data,
+      'activation_hash', v_activation.activation_hash,
+      'from_stage', v_activation.from_stage,
+      'coins_reward', v_activation.coins_reward,
+      'usdc_reward', v_activation.usdc_reward
+    );
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- ── submit_activation RPC ───────────────────────────────────────────
+create or replace function submit_activation(
+  p_job_id uuid,
+  p_from_stage integer,
+  p_activation_data text,
+  p_activation_hash text
+) returns void as $$
+declare
+  v_next_stage integer;
+  v_next_status text;
+begin
+  v_next_stage := p_from_stage + 1;
+  v_next_status := 'stage_' || v_next_stage::text;
+
+  -- Insert activation for next stage
+  insert into pipeline_activations (job_id, from_stage, to_stage, activation_data, activation_hash)
+  values (p_job_id, p_from_stage, v_next_stage, p_activation_data, p_activation_hash);
+
+  -- Advance job status
+  update pipeline_jobs
+  set status = v_next_status,
+      current_stage = v_next_stage
+  where id = p_job_id;
+end;
+$$ language plpgsql security definer;
+
+-- ── complete_pipeline_job RPC ───────────────────────────────────────
+create or replace function complete_pipeline_job(
+  p_job_id uuid,
+  p_result_encrypted text,
+  p_result_hash text
+) returns jsonb as $$
+declare
+  v_job record;
+  v_slot record;
+  v_coins_per_worker integer;
+  v_usdc_per_worker numeric(12,6);
+  v_user_id uuid;
+begin
+  select * into v_job
+  from pipeline_jobs
+  where id = p_job_id
+  for update;
+
+  if v_job is null then
+    raise exception 'Pipeline job not found';
+  end if;
+
+  -- Mark completed
+  update pipeline_jobs
+  set status = 'completed',
+      result_encrypted = p_result_encrypted,
+      result_hash = p_result_hash,
+      completed_at = now()
+  where id = p_job_id;
+
+  -- Update pipeline activity
+  update compute_pipelines
+  set last_activity = now()
+  where id = v_job.pipeline_id;
+
+  -- Split earnings equally across all pipeline slots
+  select total_stages into v_coins_per_worker
+  from compute_pipelines where id = v_job.pipeline_id;
+
+  v_coins_per_worker := v_job.coins_reward / v_coins_per_worker;
+  v_usdc_per_worker := v_job.usdc_reward / (select total_stages from compute_pipelines where id = v_job.pipeline_id);
+
+  -- Award each worker in the pipeline
+  for v_slot in
+    select ps.worker_id
+    from pipeline_slots ps
+    where ps.pipeline_id = v_job.pipeline_id
+      and ps.worker_id is not null
+  loop
+    -- Get user for this worker
+    select user_id into v_user_id
+    from compute_workers where id = v_slot.worker_id;
+
+    if v_user_id is not null then
+      -- Award coins
+      perform award_coins(v_user_id, v_coins_per_worker, 'pipeline_job', p_job_id::text);
+
+      -- Credit USDC
+      update users
+      set total_earned_usdc = total_earned_usdc + v_usdc_per_worker
+      where id = v_user_id;
+
+      -- Update worker stats
+      update compute_workers
+      set total_jobs = total_jobs + 1,
+          total_coins_earned = total_coins_earned + v_coins_per_worker,
+          total_usdc_earned = total_usdc_earned + v_usdc_per_worker
+      where id = v_slot.worker_id;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'coins_per_worker', v_coins_per_worker,
+    'usdc_per_worker', v_usdc_per_worker
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── pipeline_heartbeat RPC ──────────────────────────────────────────
+create or replace function pipeline_heartbeat(
+  p_pipeline_id uuid,
+  p_stage_index integer
+) returns void as $$
+begin
+  update pipeline_slots
+  set last_heartbeat = now()
+  where pipeline_id = p_pipeline_id
+    and stage_index = p_stage_index;
+
+  update compute_pipelines
+  set last_activity = now()
+  where id = p_pipeline_id;
+end;
+$$ language plpgsql security definer;
+
+-- ── handle_pipeline_worker_drop RPC ─────────────────────────────────
+create or replace function handle_pipeline_worker_drop(
+  p_pipeline_id uuid,
+  p_stage_index integer
+) returns void as $$
+declare
+  v_worker_id uuid;
+begin
+  -- Get the worker in this slot
+  select worker_id into v_worker_id
+  from pipeline_slots
+  where pipeline_id = p_pipeline_id
+    and stage_index = p_stage_index;
+
+  -- Mark slot failed
+  update pipeline_slots
+  set status = 'failed',
+      worker_id = null
+  where pipeline_id = p_pipeline_id
+    and stage_index = p_stage_index;
+
+  -- Reset worker if exists
+  if v_worker_id is not null then
+    update compute_workers
+    set mode = 'solo',
+        pipeline_id = null,
+        pipeline_stage = null,
+        status = 'offline'
+    where id = v_worker_id;
+  end if;
+
+  -- Pipeline → draining
+  update compute_pipelines
+  set status = 'draining'
+  where id = p_pipeline_id
+    and status in ('ready', 'processing');
+
+  -- Fail in-progress pipeline jobs
+  update pipeline_jobs
+  set status = 'failed'
+  where pipeline_id = p_pipeline_id
+    and status not in ('completed', 'failed', 'expired');
+end;
+$$ language plpgsql security definer;
+
+-- ── Cleanup stale pipelines cron ────────────────────────────────────
+-- Dissolve pipelines stuck in 'draining' for 2+ min, expire stale pipeline_jobs
+create or replace function cleanup_stale_pipelines() returns integer as $$
+declare
+  v_cleaned integer := 0;
+  v_pipeline record;
+  v_slot record;
+begin
+  -- Dissolve pipelines stuck in draining for 2+ minutes
+  for v_pipeline in
+    select * from compute_pipelines
+    where status = 'draining'
+      and last_activity < now() - interval '2 minutes'
+  loop
+    -- Reset all workers in this pipeline
+    for v_slot in
+      select worker_id from pipeline_slots
+      where pipeline_id = v_pipeline.id and worker_id is not null
+    loop
+      update compute_workers
+      set mode = 'solo', pipeline_id = null, pipeline_stage = null, status = 'idle'
+      where id = v_slot.worker_id;
+    end loop;
+
+    update compute_pipelines set status = 'dissolved' where id = v_pipeline.id;
+    v_cleaned := v_cleaned + 1;
+  end loop;
+
+  -- Expire old pending pipeline jobs
+  update pipeline_jobs
+  set status = 'expired'
+  where status = 'pending'
+    and created_at < now() - interval '5 minutes';
+
+  -- Detect dropped workers (heartbeat > 90s ago in ready pipelines)
+  for v_slot in
+    select ps.pipeline_id, ps.stage_index
+    from pipeline_slots ps
+    join compute_pipelines cp on cp.id = ps.pipeline_id
+    where cp.status in ('ready', 'processing')
+      and ps.worker_id is not null
+      and ps.last_heartbeat < now() - interval '90 seconds'
+  loop
+    perform handle_pipeline_worker_drop(v_slot.pipeline_id, v_slot.stage_index);
+    v_cleaned := v_cleaned + 1;
+  end loop;
+
+  -- Clean up consumed activations older than 5 minutes
+  delete from pipeline_activations
+  where consumed_at is not null
+    and consumed_at < now() - interval '5 minutes';
+
+  return v_cleaned;
+end;
+$$ language plpgsql security definer;
+
+select cron.schedule(
+  'cleanup-stale-pipelines',
+  '* * * * *',
+  $$ select cleanup_stale_pipelines(); $$
+);
+
 -- Shard network stats RPC
 create or replace function shard_network_stats()
 returns jsonb as $$
@@ -1410,3 +1967,6 @@ begin
   );
 end;
 $$ language plpgsql security definer;
+
+-- Reload PostgREST schema cache so all RPCs (including place_stake) are discoverable
+notify pgrst, 'reload schema';

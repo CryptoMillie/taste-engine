@@ -258,6 +258,142 @@ export async function fetchUserShardJobs(userId, limit = 5) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// Pipeline Inference API — layer-sharded multi-worker coordination
+// ══════════════════════════════════════════════════════════════════
+
+/** Join a pipeline for collaborative inference. Returns assignment info. */
+export async function joinPipeline(workerId, modelName) {
+  if (!supabase || !workerId) return null;
+  try {
+    const { data, error } = await supabase.rpc("join_pipeline", {
+      p_worker_id: workerId,
+      p_model_name: modelName || "llama-3.1-8b-4shard",
+    });
+    if (error) {
+      console.error("joinPipeline error:", error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Leave current pipeline and return to solo mode. */
+export async function leavePipeline(workerId) {
+  if (!supabase || !workerId) return;
+  try {
+    const { error } = await supabase.rpc("leave_pipeline", {
+      p_worker_id: workerId,
+    });
+    if (error) console.error("leavePipeline error:", error.message);
+  } catch { /* ignore */ }
+}
+
+/** Claim work for a pipeline stage. Stage 0: pending jobs. Stages 1+: activations. */
+export async function claimPipelineStage(pipelineId, stageIndex) {
+  if (!supabase || !pipelineId) return null;
+  try {
+    const { data, error } = await supabase.rpc("claim_pipeline_stage", {
+      p_pipeline_id: pipelineId,
+      p_stage_index: stageIndex,
+    });
+    if (error) {
+      console.error("claimPipelineStage error:", error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Submit activation tensor from one stage to the next. */
+export async function submitActivation(jobId, fromStage, activationData, activationHash) {
+  if (!supabase || !jobId) return;
+  try {
+    const { error } = await supabase.rpc("submit_activation", {
+      p_job_id: jobId,
+      p_from_stage: fromStage,
+      p_activation_data: activationData,
+      p_activation_hash: activationHash,
+    });
+    if (error) console.error("submitActivation error:", error.message);
+  } catch { /* ignore */ }
+}
+
+/** Poll for an unconsumed activation destined for a given stage. */
+export async function pollActivation(jobId, toStage) {
+  if (!supabase || !jobId) return null;
+  try {
+    const { data } = await supabase
+      .from("pipeline_activations")
+      .select("id, activation_data, activation_hash, from_stage")
+      .eq("job_id", jobId)
+      .eq("to_stage", toStage)
+      .is("consumed_at", null)
+      .limit(1)
+      .single();
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Complete a pipeline job (final stage). */
+export async function completePipelineJob(jobId, resultEncrypted, resultHash) {
+  if (!supabase || !jobId) return null;
+  try {
+    const { data, error } = await supabase.rpc("complete_pipeline_job", {
+      p_job_id: jobId,
+      p_result_encrypted: resultEncrypted,
+      p_result_hash: resultHash,
+    });
+    if (error) {
+      console.error("completePipelineJob error:", error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Send heartbeat for a pipeline slot. */
+export async function sendPipelineHeartbeat(pipelineId, stageIndex) {
+  if (!supabase || !pipelineId) return;
+  try {
+    await supabase.rpc("pipeline_heartbeat", {
+      p_pipeline_id: pipelineId,
+      p_stage_index: stageIndex,
+    });
+  } catch { /* ignore */ }
+}
+
+/** Fetch pipeline status with all slot info for UI display. */
+export async function fetchPipelineStatus(pipelineId) {
+  if (!supabase || !pipelineId) return null;
+  try {
+    const [{ data: pipeline }, { data: slots }] = await Promise.all([
+      supabase
+        .from("compute_pipelines")
+        .select("id, model_name, total_stages, status, formed_at, last_activity, config")
+        .eq("id", pipelineId)
+        .single(),
+      supabase
+        .from("pipeline_slots")
+        .select("stage_index, worker_id, layer_start, layer_end, status, last_heartbeat")
+        .eq("pipeline_id", pipelineId)
+        .order("stage_index"),
+    ]);
+    if (!pipeline) return null;
+    return { ...pipeline, slots: slots || [] };
+  } catch {
+    return null;
+  }
+}
+
 /** Initialize membership for a user (free tier + 48hr trial). */
 export async function initMembership(userId) {
   if (!supabase || !userId) return null;
