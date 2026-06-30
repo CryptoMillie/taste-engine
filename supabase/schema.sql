@@ -1103,6 +1103,200 @@ select cron.schedule(
 );
 
 -- ══════════════════════════════════════════════════════════════════
+-- Taste Reputation Multiplier + RLHF-as-a-Service
+-- ══════════════════════════════════════════════════════════════════
+
+-- Reputation columns on users
+alter table users add column if not exists taste_reputation numeric(4,2) default 1.00;
+alter table users add column if not exists taste_reputation_updated_at timestamptz;
+
+-- RLHF columns on users
+alter table users add column if not exists rlhf_opted_in boolean default true;
+alter table users add column if not exists rlhf_dividends_earned numeric(12,6) default 0;
+
+-- Index for reputation calculation performance
+create index if not exists idx_votes_user_created on votes(user_id, created_at desc);
+
+-- RLHF purchases table
+create table if not exists rlhf_purchases (
+  id uuid primary key default gen_random_uuid(),
+  buyer_agent_hash text,
+  amount_usdc numeric(12,6) not null,
+  pairs_count integer not null default 0,
+  category text,
+  created_at timestamptz default now()
+);
+
+alter table rlhf_purchases enable row level security;
+
+-- ── update_taste_reputation RPC ──────────────────────────────────
+create or replace function update_taste_reputation(
+  p_user_id uuid
+) returns void as $$
+declare
+  v_total integer;
+  v_high integer;
+  v_reputation numeric(4,2);
+  v_last_vote_at timestamptz;
+  v_days_inactive numeric;
+begin
+  -- Count last 50 votes and those with quality >= 0.7
+  select count(*), count(*) filter (where quality_score >= 0.7)
+  into v_total, v_high
+  from (
+    select quality_score
+    from votes
+    where user_id = p_user_id
+    order by created_at desc
+    limit 50
+  ) recent;
+
+  -- Bayesian smoothing: 1.0 + 2.0 * ((high + 3) / (total + 6))
+  v_reputation := 1.0 + 2.0 * ((v_high + 3)::numeric / (v_total + 6));
+
+  -- Decay: if last vote > 3 days ago, multiply by 0.95^(days_inactive - 3), floor at 1.0
+  select max(created_at) into v_last_vote_at
+  from votes where user_id = p_user_id;
+
+  if v_last_vote_at is not null then
+    v_days_inactive := extract(epoch from (now() - v_last_vote_at)) / 86400.0;
+    if v_days_inactive > 3 then
+      v_reputation := v_reputation * power(0.95, v_days_inactive - 3);
+    end if;
+  end if;
+
+  -- Floor at 1.0, cap at 3.0
+  v_reputation := greatest(1.00, least(3.00, v_reputation));
+
+  update users
+  set taste_reputation = v_reputation,
+      taste_reputation_updated_at = now()
+  where id = p_user_id;
+end;
+$$ language plpgsql security definer;
+
+-- ── fetch_taste_reputation RPC ───────────────────────────────────
+create or replace function fetch_taste_reputation(
+  p_user_id uuid
+) returns jsonb as $$
+declare
+  v_reputation numeric(4,2);
+  v_updated_at timestamptz;
+  v_total integer;
+  v_high integer;
+begin
+  select taste_reputation, taste_reputation_updated_at
+  into v_reputation, v_updated_at
+  from users where id = p_user_id;
+
+  -- Count last 50 votes
+  select count(*), count(*) filter (where quality_score >= 0.7)
+  into v_total, v_high
+  from (
+    select quality_score
+    from votes
+    where user_id = p_user_id
+    order by created_at desc
+    limit 50
+  ) recent;
+
+  return jsonb_build_object(
+    'reputation', coalesce(v_reputation, 1.00),
+    'total_recent_votes', v_total,
+    'high_quality_votes', v_high,
+    'updated_at', v_updated_at
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── distribute_rlhf_dividends RPC ────────────────────────────────
+create or replace function distribute_rlhf_dividends(
+  p_purchase_id uuid,
+  p_category text,
+  p_amount_usdc numeric
+) returns integer as $$
+declare
+  v_pool_amount numeric;
+  v_contributor_count integer;
+  v_per_user integer;
+  v_user record;
+  v_distributed integer := 0;
+begin
+  -- 50% of purchase price goes to contributors
+  v_pool_amount := p_amount_usdc * 0.5;
+
+  -- Count eligible contributors (quality >= 0.8 votes, opted in)
+  select count(distinct v.user_id) into v_contributor_count
+  from votes v
+  join users u on u.id = v.user_id
+  where v.quality_score >= 0.8
+    and v.source = 'human'
+    and u.rlhf_opted_in = true
+    and (p_category is null or v.winner_id in (
+      select id from items where cat = p_category
+    ) or v.loser_id in (
+      select id from items where cat = p_category
+    ));
+
+  if v_contributor_count = 0 then
+    return 0;
+  end if;
+
+  -- Convert to coins: 1 USDC ~ 100 coins, split equally
+  v_per_user := greatest(1, ((v_pool_amount * 100) / v_contributor_count)::integer);
+
+  -- Award coins to each contributor
+  for v_user in
+    select distinct v.user_id
+    from votes v
+    join users u on u.id = v.user_id
+    where v.quality_score >= 0.8
+      and v.source = 'human'
+      and u.rlhf_opted_in = true
+      and (p_category is null or v.winner_id in (
+        select id from items where cat = p_category
+      ) or v.loser_id in (
+        select id from items where cat = p_category
+      ))
+  loop
+    perform award_coins(v_user.user_id, v_per_user, 'rlhf_dividend', p_purchase_id::text);
+    update users set rlhf_dividends_earned = rlhf_dividends_earned + (v_pool_amount / v_contributor_count)
+    where id = v_user.user_id;
+    v_distributed := v_distributed + 1;
+  end loop;
+
+  return v_distributed;
+end;
+$$ language plpgsql security definer;
+
+-- ── get_rlhf_user_stats RPC ──────────────────────────────────────
+create or replace function get_rlhf_user_stats(
+  p_user_id uuid
+) returns jsonb as $$
+declare
+  v_high_quality_votes integer;
+  v_dividends_earned numeric(12,6);
+  v_opted_in boolean;
+begin
+  select rlhf_dividends_earned, rlhf_opted_in
+  into v_dividends_earned, v_opted_in
+  from users where id = p_user_id;
+
+  select count(*) into v_high_quality_votes
+  from votes
+  where user_id = p_user_id
+    and quality_score >= 0.8
+    and source = 'human';
+
+  return jsonb_build_object(
+    'high_quality_votes', coalesce(v_high_quality_votes, 0),
+    'dividends_earned', coalesce(v_dividends_earned, 0),
+    'opted_in', coalesce(v_opted_in, true)
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ══════════════════════════════════════════════════════════════════
 -- Shard Distributed Inference
 -- ══════════════════════════════════════════════════════════════════
 

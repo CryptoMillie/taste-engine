@@ -5,6 +5,7 @@
 import { supabase } from "./supabase";
 import { QUALITY_THRESHOLD } from "./quality";
 import { awardCoins } from "./coins";
+import { updateReputation } from "./reputation";
 
 // Coin economy rates
 const BASE_COINS = 10;
@@ -41,6 +42,7 @@ export async function submitVote({
   sessionId,
   streakDays = 0,
   isSpeedRound = false,
+  reputation = 1.0,
 }) {
   if (!supabase) return { earned: false, amount: 0, coinsEarned: 0 };
 
@@ -97,12 +99,14 @@ export async function submitVote({
       }
     }
 
-    // Award Taste Coins if quality is sufficient
+    // Award Taste Coins if quality is sufficient (multiplied by reputation)
     let coinsEarned = 0;
     if (userId && qualityScore >= QUALITY_THRESHOLD) {
-      coinsEarned = BASE_COINS + getStreakBonus(streakDays);
+      coinsEarned = Math.floor(BASE_COINS * reputation) + getStreakBonus(streakDays);
       if (isSpeedRound) coinsEarned += SPEED_ROUND_BONUS;
       awardCoins(userId, coinsEarned, "vote", `${winnerId}_vs_${loserId}`).catch(() => {});
+      // Fire-and-forget reputation recalculation
+      updateReputation(userId).catch(() => {});
     }
 
     // Increment market votes if an open market exists for this pair

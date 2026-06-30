@@ -3,6 +3,7 @@ import { T } from "../theme";
 import { supabase } from "../api/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { fetchCoinHistory } from "../api/coins";
+import { fetchRlhfStats, toggleRlhfOptIn } from "../api/reputation";
 import ApiKeys from "./ApiKeys";
 
 function ApiKeysSection({ userId }) {
@@ -30,6 +31,8 @@ export default function Profile({
   onSignInTwitter,
   onSignOut,
   computeStats = null,
+  reputation = 1.0,
+  repDetails = {},
 }) {
   const { walletAddress, connectWallet, connectMetaMask, connectPhantom } = useAuth();
   const [earnings, setEarnings] = useState(0);
@@ -38,6 +41,7 @@ export default function Profile({
   const [qualityStats, setQualityStats] = useState(null);
   const [recentStakes, setRecentStakes] = useState([]);
   const [coinHistory, setCoinHistory] = useState([]);
+  const [rlhfStats, setRlhfStats] = useState({ highQualityVotes: 0, dividendsEarned: 0, optedIn: true });
 
   useEffect(() => {
     if (!supabase || !userId) return;
@@ -78,6 +82,9 @@ export default function Profile({
 
     // Fetch coin history
     fetchCoinHistory(userId, 10).then(setCoinHistory);
+
+    // Fetch RLHF stats
+    fetchRlhfStats(userId).then(setRlhfStats);
   }, [userId]);
 
   const handleRequestPayout = async () => {
@@ -254,6 +261,115 @@ export default function Profile({
             ))}
           </div>
         )}
+      </div>
+
+      {/* Taste Reputation */}
+      <div style={sectionStyle}>
+        <div
+          className="mono"
+          style={{ fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 6 }}
+        >
+          TASTE REPUTATION
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12 }}>
+          <div className="disp" style={{ fontSize: 42, fontWeight: 800, color: "#7c3aed" }}>
+            {reputation.toFixed(1)}x
+          </div>
+          <div style={{ fontSize: 13, color: T.soft }}>earning multiplier</div>
+        </div>
+        <div style={{ fontSize: 13, color: T.soft, marginBottom: 10 }}>
+          {repDetails.highQualityVotes || 0}/{repDetails.totalRecentVotes || 0} high-quality (last 50)
+        </div>
+        {/* Progress bar: 0% at 1.0x, 100% at 3.0x */}
+        <div style={{
+          width: "100%", height: 8, background: T.line,
+          borderRadius: 4, overflow: "hidden", marginBottom: 10,
+        }}>
+          <div style={{
+            width: `${Math.min(100, ((reputation - 1.0) / 2.0) * 100)}%`,
+            height: "100%",
+            background: "#7c3aed",
+            borderRadius: 4,
+            transition: "width 0.3s ease",
+          }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.soft }}>
+          <span>1.0x</span>
+          <span>2.0x</span>
+          <span>3.0x</span>
+        </div>
+        <div style={{
+          fontSize: 12, color: T.soft, marginTop: 10,
+          padding: "8px 10px", background: T.paper, borderRadius: 8,
+        }}>
+          Reputation decays if inactive for 3+ days. Keep voting to maintain your multiplier.
+        </div>
+      </div>
+
+      {/* RLHF Data Contributions */}
+      <div style={sectionStyle}>
+        <div
+          className="mono"
+          style={{ fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10 }}
+        >
+          RLHF DATA CONTRIBUTIONS
+        </div>
+        <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+          <div>
+            <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#7c3aed" }}>
+              {rlhfStats.highQualityVotes}
+            </div>
+            <div style={{ fontSize: 12, color: T.soft }}>Preference pairs</div>
+          </div>
+          <div>
+            <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#16a34a" }}>
+              ${rlhfStats.dividendsEarned.toFixed(4)}
+            </div>
+            <div style={{ fontSize: 12, color: T.soft }}>Data dividends</div>
+          </div>
+        </div>
+        {/* Quality tier badge */}
+        <div style={{ marginBottom: 12 }}>
+          {(() => {
+            const v = rlhfStats.highQualityVotes;
+            const tier = v >= 100 ? { label: "GOLD", color: "#d97706", bg: "#fef3c7" }
+              : v >= 25 ? { label: "SILVER", color: "#6b7280", bg: "#f3f4f6" }
+              : { label: "BRONZE", color: "#92400e", bg: "#fef3c7" };
+            return (
+              <span className="mono" style={{
+                fontSize: 10, fontWeight: 700, color: tier.color,
+                background: tier.bg, padding: "3px 10px", borderRadius: 6,
+                letterSpacing: "0.08em",
+              }}>
+                {tier.label} CONTRIBUTOR
+              </span>
+            );
+          })()}
+        </div>
+        {/* Opt-in/out toggle */}
+        <button
+          onClick={() => {
+            const newVal = !rlhfStats.optedIn;
+            setRlhfStats((s) => ({ ...s, optedIn: newVal }));
+            toggleRlhfOptIn(userId, newVal);
+          }}
+          style={{
+            background: rlhfStats.optedIn ? "#7c3aed" : T.line,
+            color: rlhfStats.optedIn ? "#fff" : T.soft,
+            border: "none",
+            padding: "10px 18px",
+            borderRadius: 12,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            width: "100%",
+          }}
+        >
+          {rlhfStats.optedIn ? "Opted In — Earning Data Dividends" : "Opted Out — Tap to Opt In"}
+        </button>
+        <div style={{ fontSize: 11, color: T.soft, marginTop: 8 }}>
+          Your votes train AI models via RLHF. All data is anonymized.
+        </div>
       </div>
 
       {/* Predictions */}

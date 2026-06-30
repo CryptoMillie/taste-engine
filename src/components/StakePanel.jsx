@@ -8,6 +8,7 @@ export default function StakePanel({ pair, coinBalance, hasStaked, userId, onSta
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedAmount, setSelectedAmount] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
   // Don't render if insufficient coins, already staked, or no pair
   if (!pair || pair.length < 2 || coinBalance < 5 || hasStaked) return null;
@@ -15,18 +16,26 @@ export default function StakePanel({ pair, coinBalance, hasStaked, userId, onSta
   const handleConfirm = async () => {
     if (!selectedItem || !selectedAmount || submitting) return;
     setSubmitting(true);
-    const { error } = await placeStake({
-      userId,
-      itemA: pair[0].id,
-      itemB: pair[1].id,
-      predictedWinner: selectedItem,
-      amount: selectedAmount,
-    });
-    setSubmitting(false);
-    if (!error) {
-      onStake(selectedAmount);
-      setSelectedItem(null);
-      setSelectedAmount(null);
+    setError(null);
+    try {
+      const result = await placeStake({
+        userId,
+        itemA: pair[0].id,
+        itemB: pair[1].id,
+        predictedWinner: selectedItem,
+        amount: selectedAmount,
+      });
+      setSubmitting(false);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        onStake(selectedAmount);
+        setSelectedItem(null);
+        setSelectedAmount(null);
+      }
+    } catch (e) {
+      setSubmitting(false);
+      setError(e.message || "Failed to place stake");
     }
   };
 
@@ -122,43 +131,50 @@ export default function StakePanel({ pair, coinBalance, hasStaked, userId, onSta
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, fontSize: 13 }}>
-            <span style={{ fontWeight: 600 }}>{selectedAmount} coins</span>{" "}
-            <span style={{ color: T.soft }}>on</span>{" "}
-            <span style={{ fontWeight: 600 }}>
-              {pair.find((p) => p.id === selectedItem)?.name}
-            </span>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ flex: 1, fontSize: 13 }}>
+              <span style={{ fontWeight: 600 }}>{selectedAmount} coins</span>{" "}
+              <span style={{ color: T.soft }}>on</span>{" "}
+              <span style={{ fontWeight: 600 }}>
+                {pair.find((p) => p.id === selectedItem)?.name}
+              </span>
+            </div>
+            <button
+              onClick={handleConfirm}
+              disabled={submitting}
+              style={{
+                background: "#d97706",
+                color: "#fff",
+                border: "none",
+                borderRadius: 10,
+                padding: "8px 18px",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: submitting ? "default" : "pointer",
+                opacity: submitting ? 0.6 : 1,
+              }}
+            >
+              {submitting ? "..." : "Confirm"}
+            </button>
+            <button
+              onClick={() => { setSelectedAmount(null); setSelectedItem(null); setError(null); }}
+              style={{
+                background: "transparent",
+                border: "none",
+                fontSize: 12,
+                color: T.soft,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
           </div>
-          <button
-            onClick={handleConfirm}
-            disabled={submitting}
-            style={{
-              background: "#d97706",
-              color: "#fff",
-              border: "none",
-              borderRadius: 10,
-              padding: "8px 18px",
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: submitting ? "default" : "pointer",
-              opacity: submitting ? 0.6 : 1,
-            }}
-          >
-            {submitting ? "..." : "Confirm"}
-          </button>
-          <button
-            onClick={() => { setSelectedAmount(null); setSelectedItem(null); }}
-            style={{
-              background: "transparent",
-              border: "none",
-              fontSize: 12,
-              color: T.soft,
-              cursor: "pointer",
-            }}
-          >
-            Cancel
-          </button>
+          {error && (
+            <div style={{ fontSize: 12, color: T.pop, marginTop: 8 }}>
+              {error}
+            </div>
+          )}
         </div>
       )}
     </div>

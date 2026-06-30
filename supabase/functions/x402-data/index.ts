@@ -25,6 +25,7 @@ const PRICES: Record<string, number> = {
   compare: 0.005,
   "taste-insights": 0.08,
   expand: 0.05,
+  rlhf: 0.25,
 };
 
 const corsHeaders = {
@@ -397,6 +398,106 @@ Return JSON array: [{"name": "exact name", "desc": "2-4 word description"}]`
       }
 
       return json({ category, suggestions: result });
+    }
+
+    // --- RLHF preference pairs (GET) ---
+    if (endpoint === "rlhf" && isGet) {
+      const price = PRICES.rlhf;
+      if (!verifyPayment(req, price)) {
+        return paymentRequired(price, "Anonymized human preference pairs for RLHF training");
+      }
+
+      const category = url.searchParams.get("category") || null;
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
+
+      // Query high-quality human votes as preference pairs
+      let query = supabase
+        .from("votes")
+        .select("winner_id, loser_id, quality_score, created_at")
+        .eq("source", "human")
+        .gte("quality_score", 0.8)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      const { data: votes } = await query;
+
+      if (!votes?.length) {
+        return json({ pairs: [], metadata: { total_pairs: 0, categories: [], avg_quality: 0 } });
+      }
+
+      // Get item details for anonymized output
+      const itemIds = new Set<string>();
+      for (const v of votes) {
+        itemIds.add(v.winner_id);
+        itemIds.add(v.loser_id);
+      }
+
+      const { data: items } = await supabase
+        .from("items")
+        .select("id, name, cat")
+        .in("id", Array.from(itemIds));
+
+      const itemMap: Record<string, { name: string; category: string }> = {};
+      for (const item of items ?? []) {
+        itemMap[item.id] = { name: item.name, category: item.cat };
+      }
+
+      // Filter by category if specified
+      let pairs = votes.map((v: any) => ({
+        chosen: itemMap[v.winner_id] || { name: v.winner_id, category: "unknown" },
+        rejected: itemMap[v.loser_id] || { name: v.loser_id, category: "unknown" },
+        quality: Number(v.quality_score),
+        timestamp: v.created_at,
+      }));
+
+      if (category) {
+        pairs = pairs.filter(
+          (p: any) => p.chosen.category === category || p.rejected.category === category
+        );
+      }
+
+      // Collect categories
+      const categories = [...new Set(pairs.flatMap((p: any) => [p.chosen.category, p.rejected.category]))];
+      const avgQuality = pairs.length > 0
+        ? pairs.reduce((sum: number, p: any) => sum + p.quality, 0) / pairs.length
+        : 0;
+
+      // Log purchase
+      const paymentHeader = req.headers.get("X-402-Payment");
+      let buyerHash = "anonymous";
+      try {
+        const payment = JSON.parse(paymentHeader || "{}");
+        buyerHash = payment.sender || "anonymous";
+      } catch {}
+
+      const { data: purchase } = await supabase
+        .from("rlhf_purchases")
+        .insert({
+          buyer_agent_hash: buyerHash,
+          amount_usdc: price,
+          pairs_count: pairs.length,
+          category,
+        })
+        .select("id")
+        .single();
+
+      // Distribute dividends to contributors
+      if (purchase) {
+        await supabase.rpc("distribute_rlhf_dividends", {
+          p_purchase_id: purchase.id,
+          p_category: category,
+          p_amount_usdc: price,
+        }).catch(() => {});
+      }
+
+      return json({
+        pairs,
+        metadata: {
+          total_pairs: pairs.length,
+          categories,
+          avg_quality: Number(avgQuality.toFixed(3)),
+        },
+      });
     }
 
     return json({ error: "Unknown endpoint", available: Object.keys(PRICES) }, 404);

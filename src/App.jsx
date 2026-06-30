@@ -10,6 +10,7 @@ import { useSession } from "./hooks/useSession";
 import { useCampaigns } from "./hooks/useCampaigns";
 import { useAuth } from "./hooks/useAuth";
 import { useCoins } from "./hooks/useCoins";
+import { useReputation } from "./hooks/useReputation";
 import { T } from "./theme";
 import Arena from "./components/Arena";
 import Rankings from "./components/Rankings";
@@ -138,6 +139,7 @@ export default function App() {
   const { campaigns } = useCampaigns();
   const { userId, authProvider, userMeta, signInWithGoogle, signInWithTwitter, signOut } = useAuth();
   const { balance: coinBalance, lifetimeEarned: coinLifetime, refresh: refreshCoins, addOptimistic: addCoinsOptimistic } = useCoins(userId);
+  const { reputation, details: repDetails, refresh: refreshReputation } = useReputation(userId);
   const compute = useCompute(userId);
   const [hasStaked, setHasStaked] = useState(false);
 
@@ -220,6 +222,7 @@ export default function App() {
       timeTakenMs: pickData.timeTakenMs,
       sessionId,
       streakDays: streak.current || 0,
+      reputation,
     }).then(({ earned, amount, coinsEarned }) => {
       if (earned) {
         setFlash(`+$${amount.toFixed(2)} earned!`);
@@ -227,6 +230,7 @@ export default function App() {
         addCoinsOptimistic(coinsEarned);
         setFlash(`+${coinsEarned} coins!`);
       }
+      refreshReputation();
     });
 
     // Flash messages
@@ -415,6 +419,9 @@ export default function App() {
           {coinBalance > 0 && (
             <Stat label="COINS" value={coinBalance} color="#d97706" />
           )}
+          {reputation > 1.0 && (
+            <Stat label="TASTE POWER" value={`${reputation.toFixed(1)}x`} color="#7c3aed" />
+          )}
           {streak.current > 0 && (
             <Stat label="STREAK" value={`\u{1F525} ${streak.current}`} color={streak.current >= 7 ? T.pop : T.ink} />
           )}
@@ -591,6 +598,7 @@ export default function App() {
         />
       ) : view === "compute" ? (
         <ComputeDashboard
+          userId={userId}
           gpuAvailable={compute.gpuAvailable}
           gpuInfo={compute.gpuInfo}
           gpuClass={compute.gpuClass}
@@ -628,6 +636,8 @@ export default function App() {
           onSignInTwitter={signInWithTwitter}
           onSignOut={signOut}
           computeStats={compute.workerStats}
+          reputation={reputation}
+          repDetails={repDetails}
         />
       ) : (
         <Rankings ranked={ranked} />

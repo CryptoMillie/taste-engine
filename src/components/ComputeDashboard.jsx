@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { T } from "../theme";
 import MembershipGate from "./MembershipGate";
+import { fetchRlhfStats } from "../api/reputation";
 
 const sectionStyle = {
   background: T.card,
@@ -20,6 +21,7 @@ function formatTime(seconds) {
 }
 
 export default function ComputeDashboard({
+  userId,
   gpuAvailable,
   gpuInfo,
   gpuClass,
@@ -45,6 +47,11 @@ export default function ComputeDashboard({
   shardStats,
   userShardJobs,
 }) {
+  const [rlhfStats, setRlhfStats] = useState({ highQualityVotes: 0, dividendsEarned: 0, optedIn: true });
+  useEffect(() => {
+    if (userId) fetchRlhfStats(userId).then(setRlhfStats);
+  }, [userId]);
+
   const totalJobs = workerStats?.total_jobs || 0;
   const totalUsdc = Number(workerStats?.total_usdc_earned || 0);
   const totalCoins = workerStats?.total_coins_earned || 0;
@@ -625,6 +632,47 @@ export default function ComputeDashboard({
           ))}
         </div>
       )}
+
+      {/* Your Data — RLHF contributions */}
+      <div style={sectionStyle}>
+        <div className="mono" style={{
+          fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+        }}>
+          YOUR DATA
+        </div>
+        <div style={{ fontSize: 13, color: T.soft, marginBottom: 14, lineHeight: 1.5 }}>
+          Your preference votes train AI models via RLHF. You earn dividends when data is purchased.
+        </div>
+        <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+          <div>
+            <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#7c3aed" }}>
+              {rlhfStats.highQualityVotes}
+            </div>
+            <div style={{ fontSize: 12, color: T.soft }}>Preference pairs</div>
+          </div>
+          <div>
+            <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#16a34a" }}>
+              ${rlhfStats.dividendsEarned.toFixed(4)}
+            </div>
+            <div style={{ fontSize: 12, color: T.soft }}>Dividends earned</div>
+          </div>
+        </div>
+        {(() => {
+          const v = rlhfStats.highQualityVotes;
+          const tier = v >= 100 ? { label: "GOLD", color: "#d97706", bg: "#fef3c7" }
+            : v >= 25 ? { label: "SILVER", color: "#6b7280", bg: "#f3f4f6" }
+            : { label: "BRONZE", color: "#92400e", bg: "#fef3c7" };
+          return (
+            <span className="mono" style={{
+              fontSize: 10, fontWeight: 700, color: tier.color,
+              background: tier.bg, padding: "3px 10px", borderRadius: 6,
+              letterSpacing: "0.08em",
+            }}>
+              {tier.label} CONTRIBUTOR
+            </span>
+          );
+        })()}
+      </div>
 
       {/* GPU info — local only */}
       <div style={sectionStyle}>
