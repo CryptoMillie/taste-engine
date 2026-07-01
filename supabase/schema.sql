@@ -1,9 +1,10 @@
--- Taste Engine Schema
+-- Taste Engine Schema (Clerk-compatible)
 -- Run this in the Supabase SQL Editor
+-- User IDs are text (Clerk format: user_2xAbc...) not uuid
 
 -- Users table
 create table if not exists users (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key,
   wallet_address text,
   total_earned_usdc numeric(12,6) default 0,
   vote_count integer default 0,
@@ -47,7 +48,7 @@ create table if not exists campaign_items (
 -- Votes table
 create table if not exists votes (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid references users(id),
+  user_id text references users(id),
   winner_id text not null,
   loser_id text not null,
   campaign_id uuid references campaigns(id),
@@ -61,7 +62,7 @@ create table if not exists votes (
 -- Payouts table
 create table if not exists payouts (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid references users(id),
+  user_id text references users(id),
   amount_usdc numeric(12,6) not null,
   status text default 'pending' check (status in ('pending', 'processing', 'completed', 'failed')),
   tx_hash text,
@@ -97,37 +98,31 @@ alter table campaigns enable row level security;
 alter table votes enable row level security;
 alter table payouts enable row level security;
 
--- Public read/write for items and campaigns
+-- Permissive policies (Clerk auth does not set Supabase auth.uid())
+-- All access control is handled at the application layer via Clerk
 create policy "Items are publicly readable" on items for select using (true);
 create policy "Items are publicly insertable" on items for insert with check (true);
 create policy "Items are publicly updatable" on items for update using (true);
 create policy "Campaigns are publicly readable" on campaigns for select using (true);
 create policy "Campaign items are publicly readable" on campaign_items for select using (true);
 
--- Users can read/insert/update their own data
-create policy "Users read own data" on users for select using (auth.uid() = id);
-create policy "Users can insert own row" on users for insert with check (auth.uid() = id);
-create policy "Users update own data" on users for update using (auth.uid() = id);
+create policy "Users are publicly readable" on users for select using (true);
+create policy "Users are publicly insertable" on users for insert with check (true);
+create policy "Users are publicly updatable" on users for update using (true);
 
--- Votes insertable by authenticated users
-create policy "Authenticated users can insert votes" on votes for insert with check (auth.uid() is not null);
+create policy "Votes are publicly insertable" on votes for insert with check (true);
 create policy "Votes are publicly readable" on votes for select using (true);
 
--- Payouts readable by own user
-create policy "Users read own payouts" on payouts for select using (auth.uid() = user_id);
-create policy "Users can request payouts" on payouts for insert with check (auth.uid() = user_id);
-
--- Service role can do everything (for edge functions)
--- Already handled by Supabase default service role
+create policy "Payouts are publicly readable" on payouts for select using (true);
+create policy "Payouts are publicly insertable" on payouts for insert with check (true);
 
 -- ══════════════════════════════════════════════════════════════════
 -- Campaign payout RPCs
 -- ══════════════════════════════════════════════════════════════════
 
--- Atomically try to pay out a campaign vote (prevents overspend race conditions)
 create or replace function try_campaign_payout(
   p_campaign_id uuid,
-  p_user_id uuid
+  p_user_id text
 ) returns jsonb as $$
 declare
   v_campaign record;
@@ -193,50 +188,34 @@ begin
     img = excluded.img,
     source = 'desearch',
     refreshed_at = now();
-  -- rating, comparisons, wins are NOT touched on existing rows
 end;
 $$ language plpgsql security definer;
 
 -- ══════════════════════════════════════════════════════════════════
 -- Daily trending refresh via pg_cron
--- Run this AFTER enabling the pg_cron extension in Supabase Dashboard:
---   Dashboard → Database → Extensions → search "pg_cron" → Enable
--- Also ensure pg_net extension is enabled.
---
--- IMPORTANT: Before running this, set app.settings in the Supabase SQL Editor:
---   alter database postgres set app.settings.supabase_url = 'https://<YOUR_PROJECT>.supabase.co';
---   alter database postgres set app.settings.service_role_key = '<YOUR_SERVICE_ROLE_KEY>';
+-- Uncomment after enabling pg_cron and pg_net extensions in Supabase Dashboard
+-- and setting app.settings:
+--   alter database postgres set app.settings.supabase_url = 'https://<PROJECT>.supabase.co';
+--   alter database postgres set app.settings.service_role_key = '<SERVICE_ROLE_KEY>';
 -- ══════════════════════════════════════════════════════════════════
 
--- Enable pg_cron (if not already)
--- create extension if not exists pg_cron;
-
--- Schedule daily at 11:00 AM UTC
--- This calls the refresh-trending edge function via HTTP
-select cron.schedule(
-  'daily-trending-refresh',     -- job name
-  '0 11 * * *',                 -- 11:00 AM UTC every day
-  $$
-  select net.http_post(
-    url := current_setting('app.settings.supabase_url') || '/functions/v1/refresh-trending',
-    headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key'),
-      'Content-Type', 'application/json'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-
--- To check scheduled jobs:
---   select * from cron.job;
--- To see job run history:
---   select * from cron.job_run_details order by start_time desc limit 10;
--- To remove the job:
---   select cron.unschedule('daily-trending-refresh');
+-- select cron.schedule(
+--   'daily-trending-refresh',
+--   '0 11 * * *',
+--   $$
+--   select net.http_post(
+--     url := current_setting('app.settings.supabase_url') || '/functions/v1/refresh-trending',
+--     headers := jsonb_build_object(
+--       'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key'),
+--       'Content-Type', 'application/json'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );
 
 -- ══════════════════════════════════════════════════════════════════
--- Auth upgrade: add social login columns to users
+-- Auth columns on users
 -- ══════════════════════════════════════════════════════════════════
 
 alter table users add column if not exists auth_provider text default 'anonymous';
@@ -251,7 +230,7 @@ alter table users add column if not exists taste_state_updated_at timestamptz;
 -- ══════════════════════════════════════════════════════════════════
 
 create table if not exists coin_balances (
-  user_id uuid primary key references users(id),
+  user_id text primary key references users(id),
   balance integer not null default 0,
   lifetime_earned integer not null default 0,
   updated_at timestamptz default now()
@@ -259,7 +238,7 @@ create table if not exists coin_balances (
 
 create table if not exists coin_transactions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id),
+  user_id text not null references users(id),
   amount integer not null,
   reason text not null,
   reference_id text,
@@ -274,16 +253,16 @@ create index if not exists idx_coin_tx_created on coin_transactions(created_at);
 alter table coin_balances enable row level security;
 alter table coin_transactions enable row level security;
 
-create policy "Users read own coin balance" on coin_balances
-  for select using (auth.uid() = user_id);
-create policy "Users read own coin transactions" on coin_transactions
-  for select using (auth.uid() = user_id);
-create policy "Users can insert coin transactions" on coin_transactions
-  for insert with check (auth.uid() = user_id);
+create policy "Coin balances are publicly readable" on coin_balances
+  for select using (true);
+create policy "Coin transactions are publicly readable" on coin_transactions
+  for select using (true);
+create policy "Coin transactions are publicly insertable" on coin_transactions
+  for insert with check (true);
 
 -- Award coins RPC: atomic upsert balance + log transaction
 create or replace function award_coins(
-  p_user_id uuid,
+  p_user_id text,
   p_amount integer,
   p_reason text,
   p_reference_id text default null
@@ -339,7 +318,7 @@ create table if not exists matchup_markets (
 
 create table if not exists stakes (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id),
+  user_id text not null references users(id),
   market_id uuid not null references matchup_markets(id),
   predicted_winner text not null,
   amount integer not null,
@@ -359,12 +338,12 @@ alter table stakes enable row level security;
 
 create policy "Markets are publicly readable" on matchup_markets
   for select using (true);
-create policy "Users read own stakes" on stakes
-  for select using (auth.uid() = user_id);
+create policy "Stakes are publicly readable" on stakes
+  for select using (true);
 
 -- Place stake RPC: deduct coins + create stake + update pool
 create or replace function place_stake(
-  p_user_id uuid,
+  p_user_id text,
   p_item_a text,
   p_item_b text,
   p_predicted_winner text,
@@ -415,7 +394,7 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- Notify PostgREST to reload schema cache (needed after creating/replacing functions)
+-- Notify PostgREST to reload schema cache
 notify pgrst, 'reload schema';
 
 -- Increment market votes RPC
@@ -507,23 +486,20 @@ end;
 $$ language plpgsql security definer;
 
 -- Cron job to resolve prediction markets every 5 minutes
--- (requires pg_cron enabled)
-select cron.schedule(
-  'resolve-prediction-markets',
-  '*/5 * * * *',
-  $$ select resolve_expired_markets(); $$
-);
+-- Uncomment after enabling pg_cron extension
+-- select cron.schedule(
+--   'resolve-prediction-markets',
+--   '*/5 * * * *',
+--   $$ select resolve_expired_markets(); $$
+-- );
 
 -- ══════════════════════════════════════════════════════════════════
 -- GPU Compute Marketplace
 -- ══════════════════════════════════════════════════════════════════
 
--- Workers: devices contributing GPU compute
--- Privacy: device_id_hash is a SHA-256 of the raw device UUID (never stored).
--- gpu_class is a generic tier (e.g. "high", "mid", "low"), NOT the raw renderer string.
 create table if not exists compute_workers (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id),
+  user_id text not null references users(id),
   device_id_hash text not null,
   gpu_class text default 'unknown',
   status text not null default 'offline'
@@ -536,12 +512,9 @@ create table if not exists compute_workers (
   constraint compute_workers_user_device unique (user_id, device_id_hash)
 );
 
--- Jobs: compute tasks submitted by buyers
--- Privacy: buyer_id and assigned_worker_id are internal-only.
--- RLS ensures workers never see buyer_id, buyers never see assigned_worker_id.
 create table if not exists compute_jobs (
   id uuid primary key default gen_random_uuid(),
-  buyer_id uuid references users(id),
+  buyer_id text references users(id),
   job_type text not null check (job_type in ('inference', 'embedding', 'benchmark')),
   payload_encrypted text not null,
   payload_hash text not null,
@@ -558,9 +531,8 @@ create table if not exists compute_jobs (
   completed_at timestamptz
 );
 
--- Memberships: free vs premium tiers
 create table if not exists compute_memberships (
-  user_id uuid primary key references users(id),
+  user_id text primary key references users(id),
   tier text not null default 'free' check (tier in ('free', 'premium')),
   trial_started_at timestamptz default now(),
   trial_ends_at timestamptz default now() + interval '48 hours',
@@ -581,35 +553,23 @@ alter table compute_workers enable row level security;
 alter table compute_jobs enable row level security;
 alter table compute_memberships enable row level security;
 
--- Workers: users manage own
-create policy "Users read own workers" on compute_workers
-  for select using (auth.uid() = user_id);
-create policy "Users insert own workers" on compute_workers
-  for insert with check (auth.uid() = user_id);
-create policy "Users update own workers" on compute_workers
-  for update using (auth.uid() = user_id);
+-- Permissive policies for Clerk-based auth
+create policy "Compute workers are publicly readable" on compute_workers
+  for select using (true);
+create policy "Compute workers are publicly insertable" on compute_workers
+  for insert with check (true);
+create policy "Compute workers are publicly updatable" on compute_workers
+  for update using (true);
 
--- Jobs: assigned worker can read their job (stripped view — no buyer_id visible)
--- Workers see: id, job_type, payload_encrypted, payload_hash, status, coins_reward,
---              max_duration_ms, result_encrypted, result_hash, created_at, completed_at
--- buyer_id is column-level hidden by only selecting needed cols in the API layer.
-create policy "Workers read assigned jobs" on compute_jobs
-  for select using (
-    assigned_worker_id in (
-      select id from compute_workers where user_id = auth.uid()
-    )
-  );
--- Buyers can read their own jobs (assigned_worker_id is opaque to them)
-create policy "Buyers read own jobs" on compute_jobs
-  for select using (auth.uid() = buyer_id);
+create policy "Compute jobs are publicly readable" on compute_jobs
+  for select using (true);
 
--- Memberships: users read own
-create policy "Users read own membership" on compute_memberships
-  for select using (auth.uid() = user_id);
-create policy "Users insert own membership" on compute_memberships
-  for insert with check (auth.uid() = user_id);
-create policy "Users update own membership" on compute_memberships
-  for update using (auth.uid() = user_id);
+create policy "Compute memberships are publicly readable" on compute_memberships
+  for select using (true);
+create policy "Compute memberships are publicly insertable" on compute_memberships
+  for insert with check (true);
+create policy "Compute memberships are publicly updatable" on compute_memberships
+  for update using (true);
 
 -- ── Claim a compute job (atomic, skip locked) ──────────────────────
 create or replace function claim_compute_job(
@@ -617,15 +577,21 @@ create or replace function claim_compute_job(
 ) returns uuid as $$
 declare
   v_job_id uuid;
-  v_user_id uuid;
+  v_user_id text;
+  v_worker_status text;
   v_membership record;
 begin
-  -- Get user for this worker
-  select user_id into v_user_id
+  -- Get user and status for this worker
+  select user_id, status into v_user_id, v_worker_status
   from compute_workers where id = p_worker_id;
 
   if v_user_id is null then
     raise exception 'Worker not found';
+  end if;
+
+  -- Suspended workers cannot claim jobs
+  if v_worker_status = 'suspended' then
+    return null;
   end if;
 
   -- Check membership / daily limits
@@ -633,7 +599,6 @@ begin
   from compute_memberships where user_id = v_user_id;
 
   if v_membership is not null then
-    -- Reset daily counter if needed
     if v_membership.daily_jobs_reset_at <= now() then
       update compute_memberships
       set daily_jobs_used = 0,
@@ -642,11 +607,10 @@ begin
       v_membership.daily_jobs_used := 0;
     end if;
 
-    -- Free tier (trial expired): enforce 10 jobs/day
     if v_membership.tier = 'free'
        and v_membership.trial_ends_at <= now()
        and v_membership.daily_jobs_used >= 10 then
-      return null; -- daily limit reached
+      return null;
     end if;
   end if;
 
@@ -660,7 +624,7 @@ begin
   for update skip locked;
 
   if v_job_id is null then
-    return null; -- no jobs available
+    return null;
   end if;
 
   update compute_jobs
@@ -691,7 +655,7 @@ create or replace function complete_compute_job(
 ) returns jsonb as $$
 declare
   v_job record;
-  v_user_id uuid;
+  v_user_id text;
   v_new_balance integer;
 begin
   select * into v_job
@@ -705,7 +669,6 @@ begin
     raise exception 'Job not found or not assigned to this worker';
   end if;
 
-  -- Mark job completed
   update compute_jobs
   set status = 'completed',
       result_encrypted = p_result_encrypted,
@@ -713,19 +676,15 @@ begin
       completed_at = now()
   where id = p_job_id;
 
-  -- Get worker's user
   select user_id into v_user_id
   from compute_workers where id = p_worker_id;
 
-  -- Award coins via existing RPC
   v_new_balance := award_coins(v_user_id, v_job.coins_reward, 'compute_job', p_job_id::text);
 
-  -- Credit USDC to user
   update users
   set total_earned_usdc = total_earned_usdc + v_job.usdc_reward
   where id = v_user_id;
 
-  -- Update worker stats
   update compute_workers
   set status = 'idle',
       total_jobs = total_jobs + 1,
@@ -745,14 +704,12 @@ create or replace function expire_stale_compute_jobs() returns integer as $$
 declare
   v_expired integer := 0;
 begin
-  -- Expire pending jobs past their expiry
   update compute_jobs
   set status = 'expired'
   where status in ('pending', 'assigned')
     and expires_at <= now();
   get diagnostics v_expired = row_count;
 
-  -- Reset workers stuck in 'busy' with no active job
   update compute_workers
   set status = 'idle'
   where status = 'busy'
@@ -762,7 +719,6 @@ begin
         and assigned_worker_id is not null
     );
 
-  -- Mark workers offline if no heartbeat for 2 minutes
   update compute_workers
   set status = 'offline'
   where status in ('idle', 'busy')
@@ -772,264 +728,7 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- ── Network stats (aggregate only — no user IDs exposed) ───────────
-create or replace function compute_network_stats()
-returns jsonb as $$
-declare
-  v_workers_online integer;
-  v_workers_busy integer;
-  v_jobs_pending integer;
-  v_jobs_active integer;
-  v_jobs_completed integer;
-  v_total_usdc_paid numeric(12,6);
-  v_total_coins_paid bigint;
-begin
-  select count(*) into v_workers_online
-  from compute_workers where status in ('idle', 'busy');
-
-  select count(*) into v_workers_busy
-  from compute_workers where status = 'busy';
-
-  select count(*) into v_jobs_pending
-  from compute_jobs where status = 'pending' and expires_at > now();
-
-  select count(*) into v_jobs_active
-  from compute_jobs where status in ('assigned', 'running');
-
-  select count(*) into v_jobs_completed
-  from compute_jobs where status = 'completed';
-
-  select coalesce(sum(total_usdc_earned), 0) into v_total_usdc_paid
-  from compute_workers;
-
-  select coalesce(sum(total_coins_earned), 0) into v_total_coins_paid
-  from compute_workers;
-
-  return jsonb_build_object(
-    'workers_online', v_workers_online,
-    'workers_busy', v_workers_busy,
-    'jobs_pending', v_jobs_pending,
-    'jobs_active', v_jobs_active,
-    'jobs_completed', v_jobs_completed,
-    'total_usdc_paid', v_total_usdc_paid,
-    'total_coins_paid', v_total_coins_paid
-  );
-end;
-$$ language plpgsql security definer;
-
--- Cron: expire stale compute jobs every minute
-select cron.schedule(
-  'expire-stale-compute-jobs',
-  '* * * * *',
-  $$ select expire_stale_compute_jobs(); $$
-);
-
--- ══════════════════════════════════════════════════════════════════
--- API Keys for external buyers / AI agents
--- ══════════════════════════════════════════════════════════════════
-
-create table if not exists api_keys (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id),
-  key_hash text not null unique,
-  key_prefix text not null,
-  name text not null default 'Default',
-  usage_count integer not null default 0,
-  usage_tokens integer not null default 0,
-  is_active boolean not null default true,
-  created_at timestamptz default now()
-);
-
-create index if not exists idx_api_keys_user on api_keys(user_id);
-create index if not exists idx_api_keys_hash on api_keys(key_hash);
-
-alter table api_keys enable row level security;
-
-create policy "Users read own api keys" on api_keys
-  for select using (auth.uid() = user_id);
-create policy "Users insert own api keys" on api_keys
-  for insert with check (auth.uid() = user_id);
-create policy "Users update own api keys" on api_keys
-  for update using (auth.uid() = user_id);
-
--- ══════════════════════════════════════════════════════════════════
--- Verathos (SN96) Verification Layer
--- ══════════════════════════════════════════════════════════════════
-
--- 1a. Trust + verification columns on compute_workers
-alter table compute_workers add column if not exists trust_score integer not null default 50;
-alter table compute_workers add column if not exists verification_count integer not null default 0;
-alter table compute_workers add column if not exists verification_pass integer not null default 0;
-alter table compute_workers add column if not exists verification_fail integer not null default 0;
-alter table compute_workers add column if not exists last_verified_at timestamptz;
-
-create index if not exists idx_compute_workers_trust on compute_workers(trust_score desc);
-
--- 1b. Verification status on compute_jobs
-alter table compute_jobs add column if not exists verification_status text default 'none'
-  check (verification_status in ('none','pending','verified','failed','error'));
-
--- 1c. Verification records table
-create table if not exists compute_verifications (
-  id uuid primary key default gen_random_uuid(),
-  job_id uuid not null references compute_jobs(id),
-  worker_id uuid not null references compute_workers(id),
-  verathos_request_payload jsonb,
-  verathos_response_text text,
-  verathos_response_hash text,
-  worker_response_text text,
-  worker_response_hash text,
-  verdict text not null default 'pending'
-    check (verdict in ('pending','pass','fail','error','inconclusive')),
-  similarity_score numeric(5,4),
-  similarity_method text default 'jaccard',
-  verathos_proof jsonb,
-  verathos_model_used text,
-  verathos_request_id text,
-  verathos_latency_ms integer,
-  shard_receipt jsonb,
-  created_at timestamptz default now()
-);
-
-create index if not exists idx_compute_verifications_job on compute_verifications(job_id);
-create index if not exists idx_compute_verifications_worker on compute_verifications(worker_id);
-create index if not exists idx_compute_verifications_verdict on compute_verifications(verdict);
-
--- RLS: workers can read their own verifications
-alter table compute_verifications enable row level security;
-
-create policy "Workers read own verifications" on compute_verifications
-  for select using (
-    worker_id in (
-      select id from compute_workers where user_id = auth.uid()
-    )
-  );
-
--- 1d. RPC: update worker trust score with Bayesian smoothing
-create or replace function update_worker_trust_score(
-  p_worker_id uuid,
-  p_verdict text
-) returns void as $$
-declare
-  v_pass integer;
-  v_total integer;
-  v_new_trust integer;
-begin
-  if p_verdict = 'pass' then
-    update compute_workers
-    set verification_count = verification_count + 1,
-        verification_pass = verification_pass + 1,
-        last_verified_at = now()
-    where id = p_worker_id;
-  elsif p_verdict = 'fail' then
-    update compute_workers
-    set verification_count = verification_count + 1,
-        verification_fail = verification_fail + 1,
-        last_verified_at = now()
-    where id = p_worker_id;
-  else
-    -- error/inconclusive: no trust penalty
-    return;
-  end if;
-
-  -- Bayesian smoothing: (pass + 5) / (total + 10) * 100
-  select verification_pass, verification_count
-  into v_pass, v_total
-  from compute_workers where id = p_worker_id;
-
-  v_new_trust := ((v_pass + 5)::numeric / (v_total + 10) * 100)::integer;
-
-  update compute_workers
-  set trust_score = v_new_trust
-  where id = p_worker_id;
-
-  -- Auto-suspend workers with trust < 20 after 5+ verifications
-  if v_new_trust < 20 and v_total >= 5 then
-    update compute_workers
-    set status = 'suspended'
-    where id = p_worker_id;
-  end if;
-end;
-$$ language plpgsql security definer;
-
--- 1e. Modify claim_compute_job: reject suspended workers
-create or replace function claim_compute_job(
-  p_worker_id uuid
-) returns uuid as $$
-declare
-  v_job_id uuid;
-  v_user_id uuid;
-  v_worker_status text;
-  v_membership record;
-begin
-  -- Get user and status for this worker
-  select user_id, status into v_user_id, v_worker_status
-  from compute_workers where id = p_worker_id;
-
-  if v_user_id is null then
-    raise exception 'Worker not found';
-  end if;
-
-  -- Suspended workers cannot claim jobs
-  if v_worker_status = 'suspended' then
-    return null;
-  end if;
-
-  -- Check membership / daily limits
-  select * into v_membership
-  from compute_memberships where user_id = v_user_id;
-
-  if v_membership is not null then
-    -- Reset daily counter if needed
-    if v_membership.daily_jobs_reset_at <= now() then
-      update compute_memberships
-      set daily_jobs_used = 0,
-          daily_jobs_reset_at = now() + interval '1 day'
-      where user_id = v_user_id;
-      v_membership.daily_jobs_used := 0;
-    end if;
-
-    -- Free tier (trial expired): enforce 10 jobs/day
-    if v_membership.tier = 'free'
-       and v_membership.trial_ends_at <= now()
-       and v_membership.daily_jobs_used >= 10 then
-      return null; -- daily limit reached
-    end if;
-  end if;
-
-  -- Claim oldest pending job
-  select id into v_job_id
-  from compute_jobs
-  where status = 'pending'
-    and expires_at > now()
-  order by created_at asc
-  limit 1
-  for update skip locked;
-
-  if v_job_id is null then
-    return null; -- no jobs available
-  end if;
-
-  update compute_jobs
-  set status = 'assigned',
-      assigned_worker_id = p_worker_id
-  where id = v_job_id;
-
-  -- Bump daily usage
-  update compute_memberships
-  set daily_jobs_used = daily_jobs_used + 1
-  where user_id = v_user_id;
-
-  -- Mark worker busy
-  update compute_workers
-  set status = 'busy'
-  where id = p_worker_id;
-
-  return v_job_id;
-end;
-$$ language plpgsql security definer;
-
--- 1f. Extend compute_network_stats with verification metrics
+-- ── Network stats (aggregate only) ───────────
 create or replace function compute_network_stats()
 returns jsonb as $$
 declare
@@ -1089,38 +788,163 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- Cron: trigger verify-compute every 2 minutes
-select cron.schedule(
-  'verify-compute-jobs',
-  '*/2 * * * *',
-  $$
-  select net.http_post(
-    url := current_setting('app.settings.supabase_url') || '/functions/v1/verify-compute',
-    headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key'),
-      'Content-Type', 'application/json'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
+-- Cron: expire stale compute jobs every minute
+-- Uncomment after enabling pg_cron
+-- select cron.schedule(
+--   'expire-stale-compute-jobs',
+--   '* * * * *',
+--   $$ select expire_stale_compute_jobs(); $$
+-- );
+
+-- ══════════════════════════════════════════════════════════════════
+-- API Keys for external buyers / AI agents
+-- ══════════════════════════════════════════════════════════════════
+
+create table if not exists api_keys (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references users(id),
+  key_hash text not null unique,
+  key_prefix text not null,
+  name text not null default 'Default',
+  usage_count integer not null default 0,
+  usage_tokens integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz default now()
 );
+
+create index if not exists idx_api_keys_user on api_keys(user_id);
+create index if not exists idx_api_keys_hash on api_keys(key_hash);
+
+alter table api_keys enable row level security;
+
+create policy "API keys are publicly readable" on api_keys
+  for select using (true);
+create policy "API keys are publicly insertable" on api_keys
+  for insert with check (true);
+create policy "API keys are publicly updatable" on api_keys
+  for update using (true);
+
+-- ══════════════════════════════════════════════════════════════════
+-- Verathos (SN96) Verification Layer
+-- ══════════════════════════════════════════════════════════════════
+
+-- Trust + verification columns on compute_workers
+alter table compute_workers add column if not exists trust_score integer not null default 50;
+alter table compute_workers add column if not exists verification_count integer not null default 0;
+alter table compute_workers add column if not exists verification_pass integer not null default 0;
+alter table compute_workers add column if not exists verification_fail integer not null default 0;
+alter table compute_workers add column if not exists last_verified_at timestamptz;
+
+create index if not exists idx_compute_workers_trust on compute_workers(trust_score desc);
+
+-- Verification status on compute_jobs
+alter table compute_jobs add column if not exists verification_status text default 'none'
+  check (verification_status in ('none','pending','verified','failed','error'));
+
+-- Verification records table
+create table if not exists compute_verifications (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references compute_jobs(id),
+  worker_id uuid not null references compute_workers(id),
+  verathos_request_payload jsonb,
+  verathos_response_text text,
+  verathos_response_hash text,
+  worker_response_text text,
+  worker_response_hash text,
+  verdict text not null default 'pending'
+    check (verdict in ('pending','pass','fail','error','inconclusive')),
+  similarity_score numeric(5,4),
+  similarity_method text default 'jaccard',
+  verathos_proof jsonb,
+  verathos_model_used text,
+  verathos_request_id text,
+  verathos_latency_ms integer,
+  shard_receipt jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_compute_verifications_job on compute_verifications(job_id);
+create index if not exists idx_compute_verifications_worker on compute_verifications(worker_id);
+create index if not exists idx_compute_verifications_verdict on compute_verifications(verdict);
+
+alter table compute_verifications enable row level security;
+
+create policy "Compute verifications are publicly readable" on compute_verifications
+  for select using (true);
+
+-- RPC: update worker trust score with Bayesian smoothing
+create or replace function update_worker_trust_score(
+  p_worker_id uuid,
+  p_verdict text
+) returns void as $$
+declare
+  v_pass integer;
+  v_total integer;
+  v_new_trust integer;
+begin
+  if p_verdict = 'pass' then
+    update compute_workers
+    set verification_count = verification_count + 1,
+        verification_pass = verification_pass + 1,
+        last_verified_at = now()
+    where id = p_worker_id;
+  elsif p_verdict = 'fail' then
+    update compute_workers
+    set verification_count = verification_count + 1,
+        verification_fail = verification_fail + 1,
+        last_verified_at = now()
+    where id = p_worker_id;
+  else
+    return;
+  end if;
+
+  select verification_pass, verification_count
+  into v_pass, v_total
+  from compute_workers where id = p_worker_id;
+
+  v_new_trust := ((v_pass + 5)::numeric / (v_total + 10) * 100)::integer;
+
+  update compute_workers
+  set trust_score = v_new_trust
+  where id = p_worker_id;
+
+  if v_new_trust < 20 and v_total >= 5 then
+    update compute_workers
+    set status = 'suspended'
+    where id = p_worker_id;
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- Cron: trigger verify-compute every 2 minutes
+-- Uncomment after enabling pg_cron and pg_net
+-- select cron.schedule(
+--   'verify-compute-jobs',
+--   '*/2 * * * *',
+--   $$
+--   select net.http_post(
+--     url := current_setting('app.settings.supabase_url') || '/functions/v1/verify-compute',
+--     headers := jsonb_build_object(
+--       'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key'),
+--       'Content-Type', 'application/json'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );
 
 -- ══════════════════════════════════════════════════════════════════
 -- Taste Reputation Multiplier + RLHF-as-a-Service
 -- ══════════════════════════════════════════════════════════════════
 
--- Reputation columns on users
 alter table users add column if not exists taste_reputation numeric(4,2) default 1.00;
 alter table users add column if not exists taste_reputation_updated_at timestamptz;
 
--- RLHF columns on users
 alter table users add column if not exists rlhf_opted_in boolean default true;
 alter table users add column if not exists rlhf_dividends_earned numeric(12,6) default 0;
 
--- Index for reputation calculation performance
 create index if not exists idx_votes_user_created on votes(user_id, created_at desc);
 
--- RLHF purchases table
 create table if not exists rlhf_purchases (
   id uuid primary key default gen_random_uuid(),
   buyer_agent_hash text,
@@ -1134,7 +958,7 @@ alter table rlhf_purchases enable row level security;
 
 -- ── update_taste_reputation RPC ──────────────────────────────────
 create or replace function update_taste_reputation(
-  p_user_id uuid
+  p_user_id text
 ) returns void as $$
 declare
   v_total integer;
@@ -1143,7 +967,6 @@ declare
   v_last_vote_at timestamptz;
   v_days_inactive numeric;
 begin
-  -- Count last 50 votes and those with quality >= 0.7
   select count(*), count(*) filter (where quality_score >= 0.7)
   into v_total, v_high
   from (
@@ -1154,10 +977,8 @@ begin
     limit 50
   ) recent;
 
-  -- Bayesian smoothing: 1.0 + 2.0 * ((high + 3) / (total + 6))
   v_reputation := 1.0 + 2.0 * ((v_high + 3)::numeric / (v_total + 6));
 
-  -- Decay: if last vote > 3 days ago, multiply by 0.95^(days_inactive - 3), floor at 1.0
   select max(created_at) into v_last_vote_at
   from votes where user_id = p_user_id;
 
@@ -1168,7 +989,6 @@ begin
     end if;
   end if;
 
-  -- Floor at 1.0, cap at 3.0
   v_reputation := greatest(1.00, least(3.00, v_reputation));
 
   update users
@@ -1180,7 +1000,7 @@ $$ language plpgsql security definer;
 
 -- ── fetch_taste_reputation RPC ───────────────────────────────────
 create or replace function fetch_taste_reputation(
-  p_user_id uuid
+  p_user_id text
 ) returns jsonb as $$
 declare
   v_reputation numeric(4,2);
@@ -1192,7 +1012,6 @@ begin
   into v_reputation, v_updated_at
   from users where id = p_user_id;
 
-  -- Count last 50 votes
   select count(*), count(*) filter (where quality_score >= 0.7)
   into v_total, v_high
   from (
@@ -1225,10 +1044,8 @@ declare
   v_user record;
   v_distributed integer := 0;
 begin
-  -- 50% of purchase price goes to contributors
   v_pool_amount := p_amount_usdc * 0.5;
 
-  -- Count eligible contributors (quality >= 0.8 votes, opted in)
   select count(distinct v.user_id) into v_contributor_count
   from votes v
   join users u on u.id = v.user_id
@@ -1245,10 +1062,8 @@ begin
     return 0;
   end if;
 
-  -- Convert to coins: 1 USDC ~ 100 coins, split equally
   v_per_user := greatest(1, ((v_pool_amount * 100) / v_contributor_count)::integer);
 
-  -- Award coins to each contributor
   for v_user in
     select distinct v.user_id
     from votes v
@@ -1274,7 +1089,7 @@ $$ language plpgsql security definer;
 
 -- ── get_rlhf_user_stats RPC ──────────────────────────────────────
 create or replace function get_rlhf_user_stats(
-  p_user_id uuid
+  p_user_id text
 ) returns jsonb as $$
 declare
   v_high_quality_votes integer;
@@ -1303,7 +1118,6 @@ $$ language plpgsql security definer;
 -- Shard Distributed Inference
 -- ══════════════════════════════════════════════════════════════════
 
--- Shard models: maps model names to gateway URLs
 create table if not exists shard_models (
   id uuid primary key default gen_random_uuid(),
   model_name text unique not null,
@@ -1329,10 +1143,9 @@ values
   ('code', 'https://c0mpute.ai/api', true, 4.5, 'Devstral 24B agentic coding model')
 on conflict (model_name) do nothing;
 
--- Shard jobs: tracks Shard inference requests (separate from compute_jobs)
 create table if not exists shard_jobs (
   id uuid primary key default gen_random_uuid(),
-  buyer_id uuid references users(id),
+  buyer_id text references users(id),
   api_key_id uuid,
   model_name text not null,
   messages jsonb not null,
@@ -1362,17 +1175,13 @@ create index if not exists idx_shard_jobs_model on shard_jobs(model_name);
 
 alter table shard_jobs enable row level security;
 
-create policy "Buyers read own shard jobs" on shard_jobs
-  for select using (auth.uid() = buyer_id);
+create policy "Shard jobs are publicly readable" on shard_jobs
+  for select using (true);
 
 -- ══════════════════════════════════════════════════════════════════
 -- Layer-Sharded Pipeline Inference
--- Coordinates N browser workers to collectively serve 8B+ models
--- by splitting the model across workers in a pipeline.
--- All additive — no existing tables or RPCs are modified.
 -- ══════════════════════════════════════════════════════════════════
 
--- Pipeline: a group of workers collectively serving a model
 create table if not exists compute_pipelines (
   id uuid primary key default gen_random_uuid(),
   model_name text not null,
@@ -1392,7 +1201,6 @@ alter table compute_pipelines enable row level security;
 create policy "Pipelines are publicly readable" on compute_pipelines
   for select using (true);
 
--- Pipeline slots: one per stage, assigned to a worker
 create table if not exists pipeline_slots (
   id uuid primary key default gen_random_uuid(),
   pipeline_id uuid not null references compute_pipelines(id) on delete cascade,
@@ -1414,17 +1222,16 @@ alter table pipeline_slots enable row level security;
 create policy "Pipeline slots are publicly readable" on pipeline_slots
   for select using (true);
 
--- Pipeline columns on compute_workers (purely additive)
+-- Pipeline columns on compute_workers
 alter table compute_workers add column if not exists pipeline_id uuid references compute_pipelines(id);
 alter table compute_workers add column if not exists pipeline_stage integer;
 alter table compute_workers add column if not exists mode text default 'solo'
   check (mode in ('solo', 'pipeline'));
 
--- Pipeline jobs: inference jobs routed to pipelines
 create table if not exists pipeline_jobs (
   id uuid primary key default gen_random_uuid(),
   pipeline_id uuid not null references compute_pipelines(id),
-  buyer_id uuid references users(id),
+  buyer_id text references users(id),
   payload_encrypted text not null,
   payload_hash text not null,
   status text not null default 'pending'
@@ -1444,10 +1251,9 @@ create index if not exists idx_pipeline_jobs_status on pipeline_jobs(status);
 create index if not exists idx_pipeline_jobs_buyer on pipeline_jobs(buyer_id);
 
 alter table pipeline_jobs enable row level security;
-create policy "Buyers read own pipeline jobs" on pipeline_jobs
-  for select using (auth.uid() = buyer_id);
+create policy "Pipeline jobs are publicly readable" on pipeline_jobs
+  for select using (true);
 
--- Pipeline activations: intermediate tensors passed between stages
 create table if not exists pipeline_activations (
   id uuid primary key default gen_random_uuid(),
   job_id uuid not null references pipeline_jobs(id) on delete cascade,
@@ -1462,11 +1268,10 @@ create table if not exists pipeline_activations (
 create index if not exists idx_pipeline_activations_job_stage on pipeline_activations(job_id, to_stage);
 
 alter table pipeline_activations enable row level security;
-create policy "Pipeline activations readable by pipeline workers" on pipeline_activations
+create policy "Pipeline activations are publicly readable" on pipeline_activations
   for select using (true);
 
 -- ── join_pipeline RPC ───────────────────────────────────────────────
--- Finds or creates a pipeline and assigns the worker to a vacant slot.
 create or replace function join_pipeline(
   p_worker_id uuid,
   p_model_name text
@@ -1475,12 +1280,11 @@ declare
   v_pipeline_id uuid;
   v_slot record;
   v_total_stages integer := 4;
-  v_layers_per_stage integer := 8; -- 32 total layers / 4 stages
+  v_layers_per_stage integer := 8;
   v_total_layers integer := 32;
   v_config jsonb;
   v_all_filled boolean;
 begin
-  -- Look for an existing forming pipeline with a vacant slot
   select p.id, p.total_stages, p.config
   into v_pipeline_id, v_total_stages, v_config
   from compute_pipelines p
@@ -1489,7 +1293,6 @@ begin
   limit 1
   for update skip locked;
 
-  -- Create a new pipeline if none found
   if v_pipeline_id is null then
     v_config := jsonb_build_object(
       'total_layers', v_total_layers,
@@ -1507,7 +1310,6 @@ begin
     values (p_model_name, v_total_stages, 'forming', v_config)
     returning id into v_pipeline_id;
 
-    -- Create all slots
     for i in 0..(v_total_stages - 1) loop
       insert into pipeline_slots (pipeline_id, stage_index, layer_start, layer_end, status)
       values (
@@ -1520,7 +1322,6 @@ begin
     end loop;
   end if;
 
-  -- Claim first vacant slot
   select * into v_slot
   from pipeline_slots
   where pipeline_id = v_pipeline_id
@@ -1534,21 +1335,18 @@ begin
     raise exception 'No vacant slots available';
   end if;
 
-  -- Assign worker to slot
   update pipeline_slots
   set worker_id = p_worker_id,
       status = 'loading',
       last_heartbeat = now()
   where id = v_slot.id;
 
-  -- Update worker
   update compute_workers
   set mode = 'pipeline',
       pipeline_id = v_pipeline_id,
       pipeline_stage = v_slot.stage_index
   where id = p_worker_id;
 
-  -- Check if all slots are now filled
   select not exists(
     select 1 from pipeline_slots
     where pipeline_id = v_pipeline_id
@@ -1581,24 +1379,21 @@ declare
   v_pipeline_id uuid;
   v_stage integer;
 begin
-  -- Get worker's pipeline info
   select pipeline_id, pipeline_stage
   into v_pipeline_id, v_stage
   from compute_workers
   where id = p_worker_id and mode = 'pipeline';
 
   if v_pipeline_id is null then
-    return; -- not in a pipeline
+    return;
   end if;
 
-  -- Clear the slot
   update pipeline_slots
   set worker_id = null,
       status = 'vacant'
   where pipeline_id = v_pipeline_id
     and stage_index = v_stage;
 
-  -- Reset worker
   update compute_workers
   set mode = 'solo',
       pipeline_id = null,
@@ -1606,13 +1401,11 @@ begin
       status = 'idle'
   where id = p_worker_id;
 
-  -- If pipeline was ready, transition to draining
   update compute_pipelines
   set status = 'draining'
   where id = v_pipeline_id
     and status in ('ready', 'processing');
 
-  -- Fail any in-progress pipeline jobs
   update pipeline_jobs
   set status = 'failed'
   where pipeline_id = v_pipeline_id
@@ -1621,7 +1414,6 @@ end;
 $$ language plpgsql security definer;
 
 -- ── claim_pipeline_stage RPC ────────────────────────────────────────
--- Stage 0: claims oldest pending job. Stages 1+: returns job data if activation exists.
 create or replace function claim_pipeline_stage(
   p_pipeline_id uuid,
   p_stage_index integer
@@ -1631,7 +1423,6 @@ declare
   v_activation record;
 begin
   if p_stage_index = 0 then
-    -- Stage 0: claim oldest pending pipeline job
     select * into v_job
     from pipeline_jobs
     where pipeline_id = p_pipeline_id
@@ -1658,7 +1449,6 @@ begin
       'usdc_reward', v_job.usdc_reward
     );
   else
-    -- Stages 1+: check for available activation
     select pa.*, pj.id as job_id, pj.payload_encrypted, pj.coins_reward, pj.usdc_reward
     into v_activation
     from pipeline_activations pa
@@ -1674,7 +1464,6 @@ begin
       return null;
     end if;
 
-    -- Mark activation consumed
     update pipeline_activations
     set consumed_at = now()
     where id = v_activation.id;
@@ -1705,11 +1494,9 @@ begin
   v_next_stage := p_from_stage + 1;
   v_next_status := 'stage_' || v_next_stage::text;
 
-  -- Insert activation for next stage
   insert into pipeline_activations (job_id, from_stage, to_stage, activation_data, activation_hash)
   values (p_job_id, p_from_stage, v_next_stage, p_activation_data, p_activation_hash);
 
-  -- Advance job status
   update pipeline_jobs
   set status = v_next_status,
       current_stage = v_next_stage
@@ -1728,7 +1515,7 @@ declare
   v_slot record;
   v_coins_per_worker integer;
   v_usdc_per_worker numeric(12,6);
-  v_user_id uuid;
+  v_user_id text;
 begin
   select * into v_job
   from pipeline_jobs
@@ -1739,7 +1526,6 @@ begin
     raise exception 'Pipeline job not found';
   end if;
 
-  -- Mark completed
   update pipeline_jobs
   set status = 'completed',
       result_encrypted = p_result_encrypted,
@@ -1747,39 +1533,32 @@ begin
       completed_at = now()
   where id = p_job_id;
 
-  -- Update pipeline activity
   update compute_pipelines
   set last_activity = now()
   where id = v_job.pipeline_id;
 
-  -- Split earnings equally across all pipeline slots
   select total_stages into v_coins_per_worker
   from compute_pipelines where id = v_job.pipeline_id;
 
   v_coins_per_worker := v_job.coins_reward / v_coins_per_worker;
   v_usdc_per_worker := v_job.usdc_reward / (select total_stages from compute_pipelines where id = v_job.pipeline_id);
 
-  -- Award each worker in the pipeline
   for v_slot in
     select ps.worker_id
     from pipeline_slots ps
     where ps.pipeline_id = v_job.pipeline_id
       and ps.worker_id is not null
   loop
-    -- Get user for this worker
     select user_id into v_user_id
     from compute_workers where id = v_slot.worker_id;
 
     if v_user_id is not null then
-      -- Award coins
       perform award_coins(v_user_id, v_coins_per_worker, 'pipeline_job', p_job_id::text);
 
-      -- Credit USDC
       update users
       set total_earned_usdc = total_earned_usdc + v_usdc_per_worker
       where id = v_user_id;
 
-      -- Update worker stats
       update compute_workers
       set total_jobs = total_jobs + 1,
           total_coins_earned = total_coins_earned + v_coins_per_worker,
@@ -1820,20 +1599,17 @@ create or replace function handle_pipeline_worker_drop(
 declare
   v_worker_id uuid;
 begin
-  -- Get the worker in this slot
   select worker_id into v_worker_id
   from pipeline_slots
   where pipeline_id = p_pipeline_id
     and stage_index = p_stage_index;
 
-  -- Mark slot failed
   update pipeline_slots
   set status = 'failed',
       worker_id = null
   where pipeline_id = p_pipeline_id
     and stage_index = p_stage_index;
 
-  -- Reset worker if exists
   if v_worker_id is not null then
     update compute_workers
     set mode = 'solo',
@@ -1843,13 +1619,11 @@ begin
     where id = v_worker_id;
   end if;
 
-  -- Pipeline → draining
   update compute_pipelines
   set status = 'draining'
   where id = p_pipeline_id
     and status in ('ready', 'processing');
 
-  -- Fail in-progress pipeline jobs
   update pipeline_jobs
   set status = 'failed'
   where pipeline_id = p_pipeline_id
@@ -1857,21 +1631,18 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- ── Cleanup stale pipelines cron ────────────────────────────────────
--- Dissolve pipelines stuck in 'draining' for 2+ min, expire stale pipeline_jobs
+-- ── Cleanup stale pipelines ────────────────────────────────────
 create or replace function cleanup_stale_pipelines() returns integer as $$
 declare
   v_cleaned integer := 0;
   v_pipeline record;
   v_slot record;
 begin
-  -- Dissolve pipelines stuck in draining for 2+ minutes
   for v_pipeline in
     select * from compute_pipelines
     where status = 'draining'
       and last_activity < now() - interval '2 minutes'
   loop
-    -- Reset all workers in this pipeline
     for v_slot in
       select worker_id from pipeline_slots
       where pipeline_id = v_pipeline.id and worker_id is not null
@@ -1885,13 +1656,11 @@ begin
     v_cleaned := v_cleaned + 1;
   end loop;
 
-  -- Expire old pending pipeline jobs
   update pipeline_jobs
   set status = 'expired'
   where status = 'pending'
     and created_at < now() - interval '5 minutes';
 
-  -- Detect dropped workers (heartbeat > 90s ago in ready pipelines)
   for v_slot in
     select ps.pipeline_id, ps.stage_index
     from pipeline_slots ps
@@ -1904,7 +1673,6 @@ begin
     v_cleaned := v_cleaned + 1;
   end loop;
 
-  -- Clean up consumed activations older than 5 minutes
   delete from pipeline_activations
   where consumed_at is not null
     and consumed_at < now() - interval '5 minutes';
@@ -1913,11 +1681,13 @@ begin
 end;
 $$ language plpgsql security definer;
 
-select cron.schedule(
-  'cleanup-stale-pipelines',
-  '* * * * *',
-  $$ select cleanup_stale_pipelines(); $$
-);
+-- Cron: cleanup stale pipelines every minute
+-- Uncomment after enabling pg_cron
+-- select cron.schedule(
+--   'cleanup-stale-pipelines',
+--   '* * * * *',
+--   $$ select cleanup_stale_pipelines(); $$
+-- );
 
 -- Shard network stats RPC
 create or replace function shard_network_stats()
@@ -1968,5 +1738,269 @@ begin
 end;
 $$ language plpgsql security definer;
 
--- Reload PostgREST schema cache so all RPCs (including place_stake) are discoverable
+-- ══════════════════════════════════════════════════════════════════
+-- Mobile Micro-Tasks
+-- ══════════════════════════════════════════════════════════════════
+
+-- Worker type column on compute_workers
+alter table compute_workers add column if not exists worker_type text default 'gpu';
+
+-- Mobile tasks table
+create table if not exists mobile_tasks (
+  id uuid primary key default gen_random_uuid(),
+  task_type text not null default 'preference-pair'
+    check (task_type in ('preference-pair', 'label-verify', 'output-rating')),
+  payload jsonb not null default '{}'::jsonb,
+  status text not null default 'pending'
+    check (status in ('pending', 'assigned', 'completed', 'expired')),
+  assigned_worker uuid references compute_workers(id),
+  result text,
+  coins_reward integer not null default 2,
+  usdc_reward numeric(12,6) not null default 0.000667,
+  assigned_at timestamptz,
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_mobile_tasks_status on mobile_tasks(status);
+create index if not exists idx_mobile_tasks_worker on mobile_tasks(assigned_worker);
+
+alter table mobile_tasks enable row level security;
+
+create policy "Mobile tasks are publicly readable" on mobile_tasks
+  for select using (true);
+
+-- ── claim_mobile_task RPC ─────────────────────────────────────────
+create or replace function claim_mobile_task(
+  p_worker_id uuid
+) returns jsonb as $$
+declare
+  v_task record;
+begin
+  -- Expire stale assigned tasks (older than 2 minutes)
+  update mobile_tasks
+  set status = 'pending', assigned_worker = null, assigned_at = null
+  where status = 'assigned'
+    and assigned_at < now() - interval '2 minutes';
+
+  -- Claim oldest pending task
+  select * into v_task
+  from mobile_tasks
+  where status = 'pending'
+  order by created_at asc
+  limit 1
+  for update skip locked;
+
+  if v_task is null then
+    return null;
+  end if;
+
+  update mobile_tasks
+  set status = 'assigned',
+      assigned_worker = p_worker_id,
+      assigned_at = now()
+  where id = v_task.id;
+
+  return jsonb_build_object(
+    'id', v_task.id,
+    'task_type', v_task.task_type,
+    'payload', v_task.payload,
+    'coins_reward', v_task.coins_reward,
+    'usdc_reward', v_task.usdc_reward
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── complete_mobile_task RPC ──────────────────────────────────────
+create or replace function complete_mobile_task(
+  p_task_id uuid,
+  p_worker_id uuid,
+  p_result text
+) returns jsonb as $$
+declare
+  v_task record;
+  v_user_id text;
+begin
+  select * into v_task
+  from mobile_tasks
+  where id = p_task_id
+    and assigned_worker = p_worker_id
+    and status = 'assigned'
+  for update;
+
+  if v_task is null then
+    return jsonb_build_object('coins', 0, 'usdc', 0);
+  end if;
+
+  update mobile_tasks
+  set status = 'completed',
+      result = p_result,
+      completed_at = now()
+  where id = p_task_id;
+
+  -- Award coins and USDC to the worker's user
+  select user_id into v_user_id
+  from compute_workers where id = p_worker_id;
+
+  if v_user_id is not null and p_result != 'skip' then
+    perform award_coins(v_user_id, v_task.coins_reward, 'mobile_task', p_task_id::text);
+
+    update users
+    set total_earned_usdc = total_earned_usdc + v_task.usdc_reward
+    where id = v_user_id;
+
+    update compute_workers
+    set total_jobs = total_jobs + 1,
+        total_coins_earned = total_coins_earned + v_task.coins_reward,
+        total_usdc_earned = total_usdc_earned + v_task.usdc_reward
+    where id = p_worker_id;
+  end if;
+
+  return jsonb_build_object(
+    'coins', case when p_result = 'skip' then 0 else v_task.coins_reward end,
+    'usdc', case when p_result = 'skip' then 0 else v_task.usdc_reward end
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── seed_mobile_tasks RPC ─────────────────────────────────────────
+-- Auto-generates preference-pair tasks from recent vote matchups
+create or replace function seed_mobile_tasks() returns integer as $$
+declare
+  v_vote record;
+  v_seeded integer := 0;
+  v_winner_name text;
+  v_loser_name text;
+  v_winner_img text;
+  v_loser_img text;
+  v_cat text;
+begin
+  for v_vote in
+    select distinct on (v.winner_id, v.loser_id)
+      v.winner_id, v.loser_id
+    from votes v
+    where v.created_at > now() - interval '24 hours'
+      and v.source = 'human'
+    order by v.winner_id, v.loser_id, v.created_at desc
+    limit 50
+  loop
+    -- Check if we already have a task for this pair
+    if exists (
+      select 1 from mobile_tasks
+      where payload->>'item_a' = v_vote.winner_id
+        and payload->>'item_b' = v_vote.loser_id
+        and created_at > now() - interval '12 hours'
+    ) then
+      continue;
+    end if;
+
+    select name, img, cat into v_winner_name, v_winner_img, v_cat
+    from items where id = v_vote.winner_id;
+
+    select name, img into v_loser_name, v_loser_img
+    from items where id = v_vote.loser_id;
+
+    if v_winner_name is null or v_loser_name is null then
+      continue;
+    end if;
+
+    insert into mobile_tasks (task_type, payload, coins_reward, usdc_reward)
+    values (
+      'preference-pair',
+      jsonb_build_object(
+        'type', 'preference-pair',
+        'item_a', v_vote.winner_id,
+        'item_b', v_vote.loser_id,
+        'option_a', v_winner_name,
+        'option_b', v_loser_name,
+        'image_a', v_winner_img,
+        'image_b', v_loser_img,
+        'context', coalesce(v_cat, 'general') || ' — which do you prefer?'
+      ),
+      2,
+      0.000667
+    );
+    v_seeded := v_seeded + 1;
+  end loop;
+
+  return v_seeded;
+end;
+$$ language plpgsql security definer;
+
+-- ── Updated compute_network_stats with mobile counts ──────────────
+create or replace function compute_network_stats()
+returns jsonb as $$
+declare
+  v_workers_online integer;
+  v_workers_busy integer;
+  v_jobs_pending integer;
+  v_jobs_active integer;
+  v_jobs_completed integer;
+  v_total_usdc_paid numeric(12,6);
+  v_total_coins_paid bigint;
+  v_verifications_total integer;
+  v_verifications_passed integer;
+  v_avg_trust_score numeric(5,1);
+  v_mobile_workers integer;
+  v_mobile_tasks_pending integer;
+  v_mobile_tasks_completed integer;
+begin
+  select count(*) into v_workers_online
+  from compute_workers where status in ('idle', 'busy');
+
+  select count(*) into v_workers_busy
+  from compute_workers where status = 'busy';
+
+  select count(*) into v_jobs_pending
+  from compute_jobs where status = 'pending' and expires_at > now();
+
+  select count(*) into v_jobs_active
+  from compute_jobs where status in ('assigned', 'running');
+
+  select count(*) into v_jobs_completed
+  from compute_jobs where status = 'completed';
+
+  select coalesce(sum(total_usdc_earned), 0) into v_total_usdc_paid
+  from compute_workers;
+
+  select coalesce(sum(total_coins_earned), 0) into v_total_coins_paid
+  from compute_workers;
+
+  select count(*) into v_verifications_total
+  from compute_verifications;
+
+  select count(*) into v_verifications_passed
+  from compute_verifications where verdict = 'pass';
+
+  select coalesce(avg(trust_score), 50) into v_avg_trust_score
+  from compute_workers where verification_count > 0;
+
+  select count(*) into v_mobile_workers
+  from compute_workers where worker_type = 'mobile' and status in ('idle', 'busy');
+
+  select count(*) into v_mobile_tasks_pending
+  from mobile_tasks where status = 'pending';
+
+  select count(*) into v_mobile_tasks_completed
+  from mobile_tasks where status = 'completed';
+
+  return jsonb_build_object(
+    'workers_online', v_workers_online,
+    'workers_busy', v_workers_busy,
+    'jobs_pending', v_jobs_pending,
+    'jobs_active', v_jobs_active,
+    'jobs_completed', v_jobs_completed,
+    'total_usdc_paid', v_total_usdc_paid,
+    'total_coins_paid', v_total_coins_paid,
+    'verifications_total', v_verifications_total,
+    'verifications_passed', v_verifications_passed,
+    'avg_trust_score', v_avg_trust_score,
+    'mobile_workers', v_mobile_workers,
+    'mobile_tasks_pending', v_mobile_tasks_pending,
+    'mobile_tasks_completed', v_mobile_tasks_completed
+  );
+end;
+$$ language plpgsql security definer;
+
+-- Reload PostgREST schema cache so all RPCs are discoverable
 notify pgrst, 'reload schema';

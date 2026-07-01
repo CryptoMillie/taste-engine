@@ -631,6 +631,17 @@ export default function App() {
           shardModels={compute.shardModels}
           shardStats={compute.shardStats}
           userShardJobs={compute.userShardJobs}
+          pipelineMode={compute.pipelineMode}
+          pipelineStatus={compute.pipelineStatus}
+          pipelineInfo={compute.pipelineInfo}
+          pipelineSlots={compute.pipelineSlots}
+          togglePipeline={compute.togglePipeline}
+          computeMode={compute.computeMode}
+          mobileTasksEnabled={compute.mobileTasksEnabled}
+          toggleMobile={compute.toggleMobile}
+          mobileTasksThisSession={compute.mobileTasksThisSession}
+          currentMobileTask={compute.currentMobileTask}
+          submitMobileTaskResult={compute.submitMobileTaskResult}
         />
       ) : view === "profile" ? (
         <Profile

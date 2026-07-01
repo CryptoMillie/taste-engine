@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { T } from "../theme";
 import MembershipGate from "./MembershipGate";
+import MobileTaskCard from "./MobileTaskCard";
 import { fetchRlhfStats } from "../api/reputation";
+import { EARNINGS_RATES } from "../api/compute";
 
 const sectionStyle = {
   background: T.card,
@@ -51,6 +53,12 @@ export default function ComputeDashboard({
   pipelineInfo,
   pipelineSlots,
   togglePipeline,
+  computeMode,
+  mobileTasksEnabled,
+  toggleMobile,
+  mobileTasksThisSession,
+  currentMobileTask,
+  submitMobileTaskResult,
 }) {
   const [rlhfStats, setRlhfStats] = useState({ highQualityVotes: 0, dividendsEarned: 0, optedIn: true });
   useEffect(() => {
@@ -71,6 +79,219 @@ export default function ComputeDashboard({
   const sessionProjectedUsdc = enabled
     ? Math.max(usdcThisSession, sessionHours * earningsRate.usdcPerHour)
     : usdcThisSession;
+
+  const mobileRate = EARNINGS_RATES.mobile;
+  const mobileSessionHours = sessionElapsed / 3600;
+  const mobileSessionCoins = mobileTasksEnabled
+    ? Math.max(mobileTasksThisSession * (mobileRate.coinsPerHour / 60), mobileSessionHours * mobileRate.coinsPerHour)
+    : 0;
+
+  if (!gpuAvailable && computeMode === "mobile") {
+    return (
+      <main style={{ maxWidth: 1080, margin: "0 auto", padding: "20px 22px 52px" }}>
+        <h2 className="disp" style={{ fontSize: 42, fontWeight: 800, marginBottom: 4 }}>
+          Earn
+        </h2>
+        <p style={{ fontSize: 15, color: T.soft, marginBottom: 20 }}>
+          Complete micro-tasks to earn USDC + Taste Coins
+        </p>
+
+        {/* Mobile Hero Card */}
+        <div style={{
+          ...sectionStyle,
+          background: mobileTasksEnabled ? "#16a34a" : T.ink,
+          color: T.paper,
+          border: "none",
+          textAlign: "center",
+          padding: "28px 20px",
+        }}>
+          <div className="mono" style={{
+            fontSize: 10, letterSpacing: "0.16em", opacity: 0.7, marginBottom: 8,
+          }}>
+            MOBILE EARNING RATE
+          </div>
+          <div className="disp" style={{ fontSize: 48, fontWeight: 800 }}>
+            ${mobileRate.usdcPerHour.toFixed(2)}<span style={{ fontSize: 20, fontWeight: 400 }}>/hr</span>
+          </div>
+          <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>
+            + {mobileRate.coinsPerHour} Taste Coins/hr
+          </div>
+          <div className="mono" style={{
+            fontSize: 10, opacity: 0.5, marginTop: 8, letterSpacing: "0.08em",
+          }}>
+            MOBILE TIER — PREFERENCE CURATION
+          </div>
+        </div>
+
+        {/* Toggle Button */}
+        <div style={{ ...sectionStyle, textAlign: "center" }}>
+          <button
+            onClick={toggleMobile}
+            disabled={starting}
+            style={{
+              width: "100%",
+              background: starting ? T.soft : mobileTasksEnabled ? T.pop : "#16a34a",
+              color: T.paper,
+              border: "none",
+              padding: "18px 24px",
+              borderRadius: 14,
+              fontSize: 18,
+              fontWeight: 700,
+              cursor: starting ? "wait" : "pointer",
+              opacity: starting ? 0.7 : 1,
+            }}
+          >
+            {starting ? "Connecting..." : mobileTasksEnabled ? "Stop Earning" : "Start Earning"}
+          </button>
+          {!mobileTasksEnabled && !starting && !error && (
+            <div style={{ fontSize: 12, color: T.soft, marginTop: 8 }}>
+              Quick preference votes — no GPU needed. Works on any phone.
+            </div>
+          )}
+          {error && (
+            <div style={{
+              fontSize: 13, color: T.pop, marginTop: 10,
+              padding: "10px 14px", background: "#fff0ee",
+              borderRadius: 10, textAlign: "left",
+            }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Live Session */}
+        {mobileTasksEnabled && (
+          <div style={sectionStyle}>
+            <div className="mono" style={{
+              fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+            }}>
+              LIVE SESSION
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 700 }}>
+                  {formatTime(sessionElapsed)}
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>Uptime</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#d97706" }}>
+                  {mobileTasksThisSession}
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>Tasks done</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 700, color: "#16a34a" }}>
+                  ${(mobileSessionHours * mobileRate.usdcPerHour).toFixed(4)}
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>USDC earned</div>
+              </div>
+            </div>
+
+            {/* Inline micro-task */}
+            {currentMobileTask ? (
+              <MobileTaskCard
+                task={currentMobileTask}
+                onSubmit={(taskId, result) => submitMobileTaskResult(taskId, result)}
+                onSkip={(taskId) => submitMobileTaskResult(taskId, "skip")}
+              />
+            ) : (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "12px 14px", background: T.paper, borderRadius: 12,
+              }}>
+                <div style={{
+                  width: 10, height: 10, borderRadius: "50%",
+                  background: "#16a34a",
+                  animation: "pulse 2s ease infinite",
+                  flexShrink: 0,
+                }} />
+                <div style={{ fontSize: 13, color: T.soft }}>
+                  Waiting for next task...
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* All-time stats */}
+        <div style={{ ...sectionStyle }}>
+          <div className="mono" style={{
+            fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+          }}>
+            ALL-TIME EARNINGS
+          </div>
+          <div style={{ display: "flex", gap: 24 }}>
+            <div>
+              <div className="disp" style={{ fontSize: 32, fontWeight: 800, color: "#16a34a" }}>
+                ${totalUsdc.toFixed(4)}
+              </div>
+              <div style={{ fontSize: 12, color: T.soft }}>USDC earned</div>
+            </div>
+            <div>
+              <div className="disp" style={{ fontSize: 32, fontWeight: 800, color: "#d97706" }}>
+                {totalCoins}
+              </div>
+              <div style={{ fontSize: 12, color: T.soft }}>Taste Coins</div>
+            </div>
+            <div>
+              <div className="disp" style={{ fontSize: 32, fontWeight: 800 }}>
+                {totalJobs}
+              </div>
+              <div style={{ fontSize: 12, color: T.soft }}>Tasks done</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Network Stats */}
+        {networkStats && (
+          <div style={{
+            ...sectionStyle,
+            background: T.ink,
+            color: T.paper,
+            border: "none",
+          }}>
+            <div className="mono" style={{
+              fontSize: 10, letterSpacing: "0.16em", marginBottom: 12, opacity: 0.5,
+            }}>
+              NETWORK
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+              <div style={{ textAlign: "center", flex: 1, minWidth: 70 }}>
+                <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#4ade80" }}>
+                  {networkStats.workers_online || 0}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.6 }}>Workers</div>
+              </div>
+              <div style={{ textAlign: "center", flex: 1, minWidth: 70 }}>
+                <div className="disp" style={{ fontSize: 24, fontWeight: 700 }}>
+                  {networkStats.mobile_workers || 0}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.6 }}>Mobile</div>
+              </div>
+              <div style={{ textAlign: "center", flex: 1, minWidth: 70 }}>
+                <div className="disp" style={{ fontSize: 24, fontWeight: 700, color: "#4ade80" }}>
+                  ${Number(networkStats.total_usdc_paid || 0).toFixed(2)}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.6 }}>USDC paid</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <MembershipGate membership={membership} earningsRate={mobileRate} />
+        </div>
+
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+          }
+        `}</style>
+      </main>
+    );
+  }
 
   if (!gpuAvailable) {
     return (
@@ -438,8 +659,8 @@ export default function ComputeDashboard({
               padding: "10px 14px", background: T.paper, borderRadius: 10,
               fontSize: 12, color: T.soft, marginBottom: 14,
             }}>
-              Powered by Verathos (Bittensor SN96). ~15% of completed jobs are randomly
-              replayed through cryptographically-verified inference to ensure honest computation.
+              ~15% of completed jobs are randomly replayed through cryptographically-verified
+              inference to ensure honest computation and protect network integrity.
             </div>
             {/* Recent verification history */}
             {verificationHistory && verificationHistory.length > 0 && (

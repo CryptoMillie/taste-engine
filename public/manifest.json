@@ -1,0 +1,19 @@
+{
+  "name": "Taste Engine",
+  "short_name": "Taste",
+  "description": "Vote, earn, and discover your taste DNA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14100A",
+  "theme_color": "#14100A",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["entertainment", "social"]
+}

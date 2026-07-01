@@ -32,6 +32,7 @@ export const EARNINGS_RATES = {
   high:    { usdcPerHour: 0.25, coinsPerHour: 80 },
   mid:     { usdcPerHour: 0.15, coinsPerHour: 60 },
   low:     { usdcPerHour: 0.08, coinsPerHour: 40 },
+  mobile:  { usdcPerHour: 0.04, coinsPerHour: 25 },
   unknown: { usdcPerHour: 0.10, coinsPerHour: 50 },
 };
 
@@ -255,6 +256,76 @@ export async function fetchUserShardJobs(userId, limit = 5) {
     return data || [];
   } catch {
     return [];
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Mobile Micro-Task API — lightweight earning for non-GPU devices
+// ══════════════════════════════════════════════════════════════════
+
+/** Register or update a mobile worker. */
+export async function registerMobileWorker(userId, deviceId) {
+  if (!supabase || !userId) return null;
+  try {
+    const deviceIdHash = await hashId(deviceId);
+    const { data, error } = await supabase
+      .from("compute_workers")
+      .upsert(
+        {
+          user_id: userId,
+          device_id_hash: deviceIdHash,
+          gpu_class: "mobile",
+          worker_type: "mobile",
+          status: "idle",
+          last_heartbeat: new Date().toISOString(),
+        },
+        { onConflict: "user_id,device_id_hash" }
+      )
+      .select()
+      .single();
+    if (error) {
+      console.error("registerMobileWorker error:", error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Claim a mobile micro-task via RPC. Returns task object or null. */
+export async function claimMobileTask(workerId) {
+  if (!supabase || !workerId) return null;
+  try {
+    const { data, error } = await supabase.rpc("claim_mobile_task", {
+      p_worker_id: workerId,
+    });
+    if (error) {
+      console.error("claimMobileTask error:", error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Submit a mobile micro-task result via RPC. Returns { coins, usdc }. */
+export async function submitMobileTask(taskId, workerId, result) {
+  if (!supabase || !taskId || !workerId) return { coins: 0, usdc: 0 };
+  try {
+    const { data, error } = await supabase.rpc("complete_mobile_task", {
+      p_task_id: taskId,
+      p_worker_id: workerId,
+      p_result: result,
+    });
+    if (error) {
+      console.error("submitMobileTask error:", error.message);
+      return { coins: 0, usdc: 0 };
+    }
+    return data || { coins: 0, usdc: 0 };
+  } catch {
+    return { coins: 0, usdc: 0 };
   }
 }
 

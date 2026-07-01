@@ -65,6 +65,32 @@ body {
   }
 }
 
+/* Tablet breakpoint — stack compute dashboard cards */
+@media (max-width: 768px) {
+  main {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+}
+
+/* Safe area insets for notched phones (iPhone X+) */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* PWA standalone mode — hide browser chrome padding */
+@media (display-mode: standalone) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card, .win, .tick, .rise {
     animation: none !important;

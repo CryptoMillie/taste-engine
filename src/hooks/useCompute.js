@@ -23,7 +23,21 @@ import {
   completePipelineJob,
   sendPipelineHeartbeat,
   fetchPipelineStatus,
+  registerMobileWorker,
+  claimMobileTask,
+  submitMobileTask,
 } from "../api/compute";
+
+/** Detect device compute capability: 'gpu', 'mobile', or 'cpu-only'. */
+function detectComputeCapability() {
+  const isTouchDevice = navigator.maxTouchPoints > 2;
+  const isSmallScreen = window.innerWidth < 1024;
+  const ua = navigator.userAgent || "";
+  const isMobileUA = /iPhone|iPad|iPod|Android|Mobile|webOS/i.test(ua);
+  if (isTouchDevice && (isSmallScreen || isMobileUA)) return "mobile";
+  if (navigator.gpu) return "gpu";
+  return "cpu-only";
+}
 
 /** SHA-256 hash for pipeline activation integrity. */
 async function sha256Pipeline(data) {
@@ -62,6 +76,21 @@ export function useCompute(userId) {
   const [shardModels, setShardModels] = useState([]);
   const [shardStats, setShardStats] = useState(null);
   const [userShardJobs, setUserShardJobs] = useState([]);
+
+  // Mobile mode state
+  const [mobileTasksEnabled, setMobileTasksEnabled] = useState(false);
+  const [mobileTasksThisSession, setMobileTasksThisSession] = useState(0);
+  const [currentMobileTask, setCurrentMobileTask] = useState(null);
+  const [computeCapability] = useState(() => detectComputeCapability());
+
+  const mobileEnabledRef = useRef(false);
+  const mobilePollRef = useRef(null);
+  const mobileHeartbeatRef = useRef(null);
+
+  useEffect(() => { mobileEnabledRef.current = mobileTasksEnabled; }, [mobileTasksEnabled]);
+
+  // Derived compute mode: 'gpu' | 'mobile' | 'unavailable'
+  const computeMode = gpuAvailable ? "gpu" : computeCapability === "mobile" ? "mobile" : "unavailable";
 
   // Pipeline mode state
   const [pipelineMode, setPipelineMode] = useState(false);
@@ -334,6 +363,106 @@ export function useCompute(userId) {
     }
   }, [enabled, userId, gpuAvailable, gpuInfo, pollForJob, refreshStats]);
 
+  // ── Mobile task submission ──────────────────────────────────────────
+  const submitMobileTaskResult = useCallback(async (taskId, result) => {
+    if (!workerIdRef.current || !taskId) return;
+    const earned = await submitMobileTask(taskId, workerIdRef.current, result);
+    if (earned.coins > 0) setCoinsThisSession((c) => c + earned.coins);
+    if (earned.usdc > 0) setUsdcThisSession((u) => u + Number(earned.usdc));
+    setMobileTasksThisSession((t) => t + 1);
+    setCurrentMobileTask(null);
+    // Auto-claim next task
+    if (mobileEnabledRef.current && workerIdRef.current) {
+      const next = await claimMobileTask(workerIdRef.current);
+      if (next) setCurrentMobileTask(next);
+    }
+    refreshStats();
+  }, [refreshStats]);
+
+  // ── Mobile mode toggle ──────────────────────────────────────────
+  const toggleMobile = useCallback(async () => {
+    if (mobileTasksEnabled) {
+      // Stop mobile earning
+      setMobileTasksEnabled(false);
+      if (mobilePollRef.current) clearInterval(mobilePollRef.current);
+      if (mobileHeartbeatRef.current) clearInterval(mobileHeartbeatRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (workerIdRef.current) {
+        await updateWorkerStatus(workerIdRef.current, "offline").catch(() => {});
+      }
+      setCurrentMobileTask(null);
+      sessionStartRef.current = null;
+    } else {
+      // Start mobile earning
+      if (!userId) return;
+      setStarting(true);
+      setError(null);
+
+      try {
+        const deviceId =
+          localStorage.getItem("taste-device-id") || crypto.randomUUID();
+        localStorage.setItem("taste-device-id", deviceId);
+
+        const worker = await Promise.race([
+          registerMobileWorker(userId, deviceId),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), 10000)
+          ),
+        ]);
+
+        if (!worker) {
+          setError("Could not register mobile worker.");
+          setStarting(false);
+          return;
+        }
+
+        workerIdRef.current = worker.id;
+
+        await Promise.race([
+          initMembership(userId),
+          new Promise((r) => setTimeout(r, 5000)),
+        ]).catch(() => {});
+        await refreshStats().catch(() => {});
+
+        setMobileTasksEnabled(true);
+        setStarting(false);
+        sessionStartRef.current = Date.now();
+        setSessionElapsed(0);
+
+        // Session timer
+        timerRef.current = setInterval(() => {
+          if (sessionStartRef.current) {
+            setSessionElapsed(Math.floor((Date.now() - sessionStartRef.current) / 1000));
+          }
+        }, 1000);
+
+        // Heartbeat every 30s
+        mobileHeartbeatRef.current = setInterval(() => {
+          if (workerIdRef.current) sendHeartbeat(workerIdRef.current);
+        }, 30000);
+
+        // Poll for mobile tasks every 3s
+        mobilePollRef.current = setInterval(async () => {
+          if (!mobileEnabledRef.current || !workerIdRef.current) return;
+          if (currentMobileTask) return; // already have a task
+          const task = await claimMobileTask(workerIdRef.current);
+          if (task) setCurrentMobileTask(task);
+        }, 3000);
+
+        // Immediate first claim
+        const first = await claimMobileTask(worker.id);
+        if (first) setCurrentMobileTask(first);
+      } catch (err) {
+        const msg = err?.message === "timeout"
+          ? "Connection timed out."
+          : "Failed to connect.";
+        console.error("Mobile toggle error:", err);
+        setError(msg);
+        setStarting(false);
+      }
+    }
+  }, [mobileTasksEnabled, userId, currentMobileTask, refreshStats]);
+
   // ── Pipeline mode toggle ──────────────────────────────────────────
   const togglePipeline = useCallback(async () => {
     if (pipelineMode) {
@@ -532,6 +661,8 @@ export function useCompute(userId) {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (pollRef.current) clearInterval(pollRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
+      if (mobilePollRef.current) clearInterval(mobilePollRef.current);
+      if (mobileHeartbeatRef.current) clearInterval(mobileHeartbeatRef.current);
       if (gpuWorkerRef.current) gpuWorkerRef.current.terminate();
       if (pipelineWorkerRef.current) pipelineWorkerRef.current.terminate();
       if (pipelineHeartbeatRef.current) clearInterval(pipelineHeartbeatRef.current);
@@ -574,5 +705,12 @@ export function useCompute(userId) {
     pipelineInfo,
     pipelineSlots,
     togglePipeline,
+    // Mobile mode
+    computeMode,
+    mobileTasksEnabled,
+    toggleMobile,
+    mobileTasksThisSession,
+    currentMobileTask,
+    submitMobileTaskResult,
   };
 }
