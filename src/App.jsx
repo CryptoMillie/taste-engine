@@ -494,19 +494,28 @@ export default function App() {
               <Cpu size={16} /> <span className="header-label">Earn</span>
             </button>
             {isSignedIn ? (
-              <UserButton afterSignOutUrl="/" />
+              <>
+                <UserButton afterSignOutUrl="/" />
+                <button
+                  onClick={() => setView(view === "profile" ? "arena" : "profile")}
+                  style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
+                  title="Profile"
+                >
+                  <User size={16} />
+                </button>
+              </>
             ) : (
-              <button onClick={signIn} style={btnStyle} title="Sign in">
+              <button
+                onClick={() => {
+                  signIn();
+                  setView("profile");
+                }}
+                style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
+                title="Sign in"
+              >
                 <User size={16} /> <span className="header-label">Sign in</span>
               </button>
             )}
-            <button
-              onClick={() => setView(view === "profile" ? "arena" : "profile")}
-              style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
-              title="Profile"
-            >
-              <User size={16} />
-            </button>
             {votes > 0 && (
               <button
                 onClick={handleReset}
