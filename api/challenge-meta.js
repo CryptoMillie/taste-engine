@@ -1,9 +1,8 @@
 /**
  * Vercel Serverless Function — OG meta tags for challenge links.
- * Challenge items are dynamic (any item in the system), so we use
- * generic but compelling preview text + the default OG image.
+ * Reads item names from the &names= query param for dynamic previews.
  *
- * URL: /api/challenge-meta?challenge=item1,item2
+ * URL: /api/challenge-meta?challenge=id1,id2&pick=id1&names=Pizza,Sushi
  */
 
 const CRAWLER_PATTERNS = [
@@ -24,7 +23,7 @@ function esc(s) {
 }
 
 export default function handler(req, res) {
-  const { challenge } = req.query;
+  const { challenge, names } = req.query;
   if (!challenge) {
     res.writeHead(302, { Location: "/" });
     return res.end();
@@ -34,15 +33,29 @@ export default function handler(req, res) {
 
   // Real browsers → redirect to static SPA
   if (!isCrawler(ua)) {
-    res.writeHead(302, { Location: `/index.html?challenge=${challenge}` });
+    const qs = new URLSearchParams(req.query).toString();
+    res.writeHead(302, { Location: `/index.html?${qs}` });
     return res.end();
   }
 
-  // Crawlers → serve OG meta tags
-  const title = esc("You've been challenged — Taste Engine");
-  const description = esc("Someone challenged your taste. Tap to cast your vote and see if you agree.");
+  // Parse item names from URL
+  const decoded = names ? decodeURIComponent(names) : "";
+  const parts = decoded.split(",").map((s) => s.trim()).filter(Boolean);
+  const nameA = parts[0] || null;
+  const nameB = parts[1] || null;
+  const hasNames = nameA && nameB;
+
+  const title = hasNames
+    ? esc(`${nameA} vs ${nameB} — which do you prefer?`)
+    : esc("You've been challenged — Taste Engine");
+  const description = hasNames
+    ? esc(`${nameA} or ${nameB}? Someone challenged your taste. Tap to cast your vote.`)
+    : esc("Someone challenged your taste. Tap to cast your vote and see if you agree.");
+
   const origin = `https://${req.headers.host}`;
-  const ogImage = `${origin}/og-image.png`;
+  const ogImage = hasNames
+    ? `${origin}/api/og?a=${encodeURIComponent(nameA)}&b=${encodeURIComponent(nameB)}`
+    : `${origin}/og-image.png`;
   const canonicalUrl = `${origin}/?challenge=${challenge}`;
 
   const html = `<!doctype html>

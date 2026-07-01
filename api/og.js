@@ -35,10 +35,14 @@ export default function handler(req) {
   const pollId = searchParams.get("poll");
   const data = pollId ? POLLS[pollId] : null;
 
-  const nameA = data?.a || "Pizza";
-  const nameB = data?.b || "Sushi";
-  const label = data?.label || "Which do you prefer?";
-  const cat = data?.cat || "";
+  // Support challenge links via ?a=Name&b=Name
+  const directA = searchParams.get("a");
+  const directB = searchParams.get("b");
+
+  const nameA = directA || data?.a || "Pizza";
+  const nameB = directB || data?.b || "Sushi";
+  const label = data?.label || (directA ? "Which do you prefer?" : "Which do you prefer?");
+  const cat = data?.cat || (directA ? "CHALLENGE" : "");
 
   const fontA = nameA.length > 14 ? 28 : 36;
   const fontB = nameB.length > 14 ? 28 : 36;

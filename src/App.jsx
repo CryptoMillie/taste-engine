@@ -272,7 +272,7 @@ export default function App() {
 
   const copyChallenge = () => {
     if (!lastPair) return;
-    const url = `${window.location.origin}${window.location.pathname}?challenge=${lastPair[0].id},${lastPair[1].id}&pick=${lastPair[0].id}`;
+    const url = `${window.location.origin}${window.location.pathname}?challenge=${lastPair[0].id},${lastPair[1].id}&pick=${lastPair[0].id}&names=${encodeURIComponent(lastPair[0].name)},${encodeURIComponent(lastPair[1].name)}`;
     navigator.clipboard.writeText(url).then(() => {
       setFlash("Challenge link copied!");
     }).catch(() => {

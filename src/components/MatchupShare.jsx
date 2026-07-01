@@ -19,7 +19,7 @@ export const socialBtnStyle = (bg) => ({
 });
 
 export default function MatchupShare({ pair, onCopyLink, heading, urlBuilder }) {
-  const defaultUrl = `${window.location.origin}${window.location.pathname}?challenge=${pair[0].id},${pair[1].id}&pick=${pair[0].id}`;
+  const defaultUrl = `${window.location.origin}${window.location.pathname}?challenge=${pair[0].id},${pair[1].id}&pick=${pair[0].id}&names=${encodeURIComponent(pair[0].name)},${encodeURIComponent(pair[1].name)}`;
   const shareUrl = urlBuilder ? urlBuilder(pair) : defaultUrl;
   const text = `${pair[0].name} vs ${pair[1].name} — which do you prefer?`;
 
