@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/react";
+import { UserButton, useUser, useClerk } from "@clerk/react";
 import { T } from "../theme";
 import { supabase } from "../api/supabase";
 import { useAuth } from "../hooks/useAuth";
@@ -20,13 +20,14 @@ export default function Profile({
   coinLifetime = 0,
   authProvider = "anonymous",
   userMeta = {},
-  onSignInTwitter,
+  onSignIn,
   onSignOut,
   computeStats = null,
   reputation = 1.0,
   repDetails = {},
 }) {
   const { walletAddress, connectWallet, connectMetaMask, connectPhantom } = useAuth();
+  const clerk = useClerk();
   const [earnings, setEarnings] = useState(0);
   const [walletInput, setWalletInput] = useState("");
   const [payoutRequested, setPayoutRequested] = useState(false);
@@ -129,40 +130,38 @@ export default function Profile({
               Sign in to sync your taste across devices
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <SignInButton mode="modal">
-                <button
-                  style={{
-                    flex: 1,
-                    background: "#000",
-                    color: "#fff",
-                    border: "none",
-                    padding: "10px 18px",
-                    borderRadius: 12,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Sign in
-                </button>
-              </SignInButton>
-              <SignUpButton mode="modal">
-                <button
-                  style={{
-                    flex: 1,
-                    background: T.ink,
-                    color: T.paper,
-                    border: "none",
-                    padding: "10px 18px",
-                    borderRadius: 12,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Sign up
-                </button>
-              </SignUpButton>
+              <button
+                onClick={() => clerk.openSignIn()}
+                style={{
+                  flex: 1,
+                  background: "#000",
+                  color: "#fff",
+                  border: "none",
+                  padding: "10px 18px",
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Sign in
+              </button>
+              <button
+                onClick={() => clerk.openSignUp()}
+                style={{
+                  flex: 1,
+                  background: T.ink,
+                  color: T.paper,
+                  border: "none",
+                  padding: "10px 18px",
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Sign up
+              </button>
             </div>
           </div>
         ) : (
