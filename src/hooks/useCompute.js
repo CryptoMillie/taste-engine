@@ -88,8 +88,10 @@ export function useCompute(userId) {
   const mobileEnabledRef = useRef(false);
   const mobilePollRef = useRef(null);
   const mobileHeartbeatRef = useRef(null);
+  const mobileTaskRef = useRef(null);
 
   useEffect(() => { mobileEnabledRef.current = mobileTasksEnabled; }, [mobileTasksEnabled]);
+  useEffect(() => { mobileTaskRef.current = currentMobileTask; }, [currentMobileTask]);
 
   // Derived compute mode: 'gpu' | 'mobile' | 'unavailable'
   // Mobile always wins — phones shouldn't run WebGPU inference even if technically available
@@ -397,7 +399,10 @@ export function useCompute(userId) {
       sessionStartRef.current = null;
     } else {
       // Start mobile earning
-      if (!userId) return;
+      if (!userId) {
+        setError("Sign in to start earning.");
+        return;
+      }
       setStarting(true);
       setError(null);
 
@@ -447,7 +452,7 @@ export function useCompute(userId) {
         // Poll for mobile tasks every 3s
         mobilePollRef.current = setInterval(async () => {
           if (!mobileEnabledRef.current || !workerIdRef.current) return;
-          if (currentMobileTask) return; // already have a task
+          if (mobileTaskRef.current) return; // already have a task
           const task = await claimMobileTask(workerIdRef.current);
           if (task) setCurrentMobileTask(task);
         }, 3000);
@@ -464,7 +469,7 @@ export function useCompute(userId) {
         setStarting(false);
       }
     }
-  }, [mobileTasksEnabled, userId, currentMobileTask, refreshStats]);
+  }, [mobileTasksEnabled, userId, refreshStats]);
 
   // ── Pipeline mode toggle ──────────────────────────────────────────
   const togglePipeline = useCallback(async () => {

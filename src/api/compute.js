@@ -263,11 +263,12 @@ export async function fetchUserShardJobs(userId, limit = 5) {
 // Mobile Micro-Task API — lightweight earning for non-GPU devices
 // ══════════════════════════════════════════════════════════════════
 
-/** Register or update a mobile worker. */
+/** Register or update a mobile worker. Falls back if worker_type column doesn't exist yet. */
 export async function registerMobileWorker(userId, deviceId) {
   if (!supabase || !userId) return null;
   try {
     const deviceIdHash = await hashId(deviceId);
+    // Try with worker_type first
     const { data, error } = await supabase
       .from("compute_workers")
       .upsert(
@@ -283,11 +284,28 @@ export async function registerMobileWorker(userId, deviceId) {
       )
       .select()
       .single();
-    if (error) {
-      console.error("registerMobileWorker error:", error.message);
+    if (!error) return data;
+    // Fallback: worker_type column may not exist yet
+    console.warn("registerMobileWorker fallback (worker_type column missing?):", error.message);
+    const { data: fallback, error: err2 } = await supabase
+      .from("compute_workers")
+      .upsert(
+        {
+          user_id: userId,
+          device_id_hash: deviceIdHash,
+          gpu_class: "mobile",
+          status: "idle",
+          last_heartbeat: new Date().toISOString(),
+        },
+        { onConflict: "user_id,device_id_hash" }
+      )
+      .select()
+      .single();
+    if (err2) {
+      console.error("registerMobileWorker error:", err2.message);
       return null;
     }
-    return data;
+    return fallback;
   } catch {
     return null;
   }
