@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/react";
 import { T } from "../theme";
 import { supabase } from "../api/supabase";
 import { useAuth } from "../hooks/useAuth";
@@ -7,17 +8,9 @@ import { fetchRlhfStats, toggleRlhfOptIn } from "../api/reputation";
 import ApiKeys from "./ApiKeys";
 
 function ApiKeysSection({ userId }) {
-  const [session, setSession] = useState(null);
-
-  useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-    });
-  }, []);
-
-  if (!session) return null;
-  return <ApiKeys userId={userId} session={session} />;
+  const { isSignedIn } = useUser();
+  if (!isSignedIn) return null;
+  return <ApiKeys userId={userId} session={null} />;
 }
 
 export default function Profile({
@@ -27,7 +20,6 @@ export default function Profile({
   coinLifetime = 0,
   authProvider = "anonymous",
   userMeta = {},
-  onSignInGoogle,
   onSignInTwitter,
   onSignOut,
   computeStats = null,
@@ -137,27 +129,8 @@ export default function Profile({
               Sign in to sync your taste across devices
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              {onSignInGoogle && (
+              <SignInButton mode="modal">
                 <button
-                  onClick={onSignInGoogle}
-                  style={{
-                    flex: 1,
-                    background: "#4285f4",
-                    color: "#fff",
-                    border: "none",
-                    padding: "10px 18px",
-                    borderRadius: 12,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Google
-                </button>
-              )}
-              {onSignInTwitter && (
-                <button
-                  onClick={onSignInTwitter}
                   style={{
                     flex: 1,
                     background: "#000",
@@ -170,20 +143,31 @@ export default function Profile({
                     cursor: "pointer",
                   }}
                 >
-                  X / Twitter
+                  Sign in
                 </button>
-              )}
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button
+                  style={{
+                    flex: 1,
+                    background: T.ink,
+                    color: T.paper,
+                    border: "none",
+                    padding: "10px 18px",
+                    borderRadius: 12,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Sign up
+                </button>
+              </SignUpButton>
             </div>
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {userMeta.avatarUrl && (
-              <img
-                src={userMeta.avatarUrl}
-                alt=""
-                style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover" }}
-              />
-            )}
+            <UserButton afterSignOutUrl="/" />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 15 }}>
                 {userMeta.displayName || userMeta.email || "Signed in"}
@@ -192,22 +176,6 @@ export default function Profile({
                 via {authProvider}
               </div>
             </div>
-            {onSignOut && (
-              <button
-                onClick={onSignOut}
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${T.line}`,
-                  padding: "6px 14px",
-                  borderRadius: 10,
-                  fontSize: 12,
-                  cursor: "pointer",
-                  color: T.soft,
-                }}
-              >
-                Sign out
-              </button>
-            )}
           </div>
         )}
       </div>

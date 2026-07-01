@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { SignInButton, SignUpButton, UserButton } from "@clerk/react";
 import { Trophy, ArrowLeft, Sparkles, RotateCcw, User, TrendingUp, Zap, Cpu } from "lucide-react";
 import { createStore, pickPair, getStreak, updateStreak } from "./engine/store";
 import { loadAllItems } from "./engine/items";
@@ -137,7 +138,7 @@ export default function App() {
 
   const { sessionId, markPairShown, recordPick } = useSession();
   const { campaigns } = useCampaigns();
-  const { userId, authProvider, userMeta, signInWithGoogle, signInWithTwitter, signOut } = useAuth();
+  const { userId, authProvider, userMeta, isSignedIn, signIn, signOut } = useAuth();
   const { balance: coinBalance, lifetimeEarned: coinLifetime, refresh: refreshCoins, addOptimistic: addCoinsOptimistic } = useCoins(userId);
   const { reputation, details: repDetails, refresh: refreshReputation } = useReputation(userId);
   const compute = useCompute(userId);
@@ -492,6 +493,15 @@ export default function App() {
             >
               <Cpu size={16} /> <span className="header-label">Earn</span>
             </button>
+            {isSignedIn ? (
+              <UserButton afterSignOutUrl="/" />
+            ) : (
+              <SignInButton mode="modal">
+                <button style={btnStyle} title="Sign in">
+                  <User size={16} /> <span className="header-label">Sign in</span>
+                </button>
+              </SignInButton>
+            )}
             <button
               onClick={() => setView(view === "profile" ? "arena" : "profile")}
               style={{ ...btnStyle, background: view === "profile" ? T.pop : T.ink }}
@@ -632,8 +642,7 @@ export default function App() {
           coinLifetime={coinLifetime}
           authProvider={authProvider}
           userMeta={userMeta}
-          onSignInGoogle={signInWithGoogle}
-          onSignInTwitter={signInWithTwitter}
+          onSignIn={signIn}
           onSignOut={signOut}
           computeStats={compute.workerStats}
           reputation={reputation}

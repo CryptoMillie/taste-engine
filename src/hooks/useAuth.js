@@ -1,24 +1,56 @@
 import { useState, useEffect, useCallback } from "react";
+import { useUser, useAuth as useClerkAuth, useClerk } from "@clerk/react";
 import { supabase } from "../api/supabase";
 
 /**
- * Supabase auth: anonymous auto-login, social upgrade (Google/Twitter),
- * wallet connect, and cross-device state sync.
+ * Auth hook powered by Clerk. Replaces Supabase auth while keeping
+ * the same return shape so the rest of the app works unchanged.
+ * Supabase is still used for data (votes, stakes, etc.) but no longer for auth.
  */
 export function useAuth() {
-  const [userId, setUserId] = useState(null);
-  const [authProvider, setAuthProvider] = useState("anonymous");
-  const [userMeta, setUserMeta] = useState({
-    displayName: null,
-    email: null,
-    avatarUrl: null,
-  });
+  const { isLoaded, isSignedIn, user } = useUser();
+  const { signOut: clerkSignOut } = useClerkAuth();
+  const clerk = useClerk();
+
   const [walletAddress, setWalletAddress] = useState(
     () => localStorage.getItem("taste-wallet") || null
   );
-  const [loading, setLoading] = useState(true);
 
-  // Sync taste state to server (debounced by caller)
+  // Derive userId from Clerk
+  const userId = user?.id ?? null;
+
+  // Derive auth provider
+  const authProvider = !isLoaded
+    ? "loading"
+    : !isSignedIn
+      ? "anonymous"
+      : user?.primaryEmailAddress
+        ? (user.externalAccounts?.[0]?.provider || "email")
+        : "clerk";
+
+  // Derive user metadata
+  const userMeta = {
+    displayName: user?.fullName || user?.firstName || null,
+    email: user?.primaryEmailAddress?.emailAddress || null,
+    avatarUrl: user?.imageUrl || null,
+  };
+
+  // Sync Clerk user to Supabase users table for data features
+  const ensureUserRow = useCallback(async (uid) => {
+    if (!supabase || !uid || !user) return;
+    try {
+      await supabase.from("users").upsert({
+        id: uid,
+        wallet_address: walletAddress,
+        auth_provider: authProvider,
+        display_name: user.fullName || user.firstName || null,
+        avatar_url: user.imageUrl || null,
+        email: user.primaryEmailAddress?.emailAddress || null,
+      }, { onConflict: "id" });
+    } catch { /* non-critical */ }
+  }, [user, walletAddress, authProvider]);
+
+  // Sync taste state to server
   const syncStateToServer = useCallback(async (uid) => {
     if (!supabase || !uid) return;
     try {
@@ -52,7 +84,6 @@ export function useAuth() {
       const localSavedAt = Number(localStorage.getItem("taste-state-saved-at") || "0");
 
       if (serverTime > localSavedAt) {
-        // Server is newer — restore
         for (const [key, val] of Object.entries(data.taste_state)) {
           localStorage.setItem(key, val);
         }
@@ -61,81 +92,16 @@ export function useAuth() {
     } catch { /* non-critical */ }
   }, []);
 
+  // When signed in, sync user row and load state from server
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
-
-    const extractMeta = (user) => {
-      const meta = user.user_metadata || {};
-      const provider = user.app_metadata?.provider || (user.is_anonymous ? "anonymous" : "email");
-      setAuthProvider(provider);
-      setUserMeta({
-        displayName: meta.full_name || meta.name || meta.preferred_username || null,
-        email: user.email || meta.email || null,
-        avatarUrl: meta.avatar_url || meta.picture || null,
-      });
-      return { provider, meta };
-    };
-
-    const ensureUserRow = async (uid, provider, meta) => {
-      try {
-        await supabase.from("users").upsert({
-          id: uid,
-          wallet_address: walletAddress,
-          auth_provider: provider,
-          display_name: meta.full_name || meta.name || meta.preferred_username || null,
-          avatar_url: meta.avatar_url || meta.picture || null,
-          email: meta.email || null,
-        }, { onConflict: "id" });
-      } catch { /* non-critical */ }
-    };
-
-    // Check existing session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        setUserId(session.user.id);
-        const { provider, meta } = extractMeta(session.user);
-        await ensureUserRow(session.user.id, provider, meta);
-        if (provider !== "anonymous") {
-          await loadStateFromServer(session.user.id);
-        }
-      } else {
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (!error && data?.user) {
-          setUserId(data.user.id);
-          extractMeta(data.user);
-          await ensureUserRow(data.user.id, "anonymous", {});
-        }
-      }
-      setLoading(false);
-    });
-
-    // Listen for auth changes (social upgrade, sign-out, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const uid = session?.user?.id ?? null;
-        setUserId(uid);
-        if (session?.user) {
-          const { provider, meta } = extractMeta(session.user);
-          await ensureUserRow(uid, provider, meta);
-          if (provider !== "anonymous") {
-            await loadStateFromServer(uid);
-          }
-        } else {
-          setAuthProvider("anonymous");
-          setUserMeta({ displayName: null, email: null, avatarUrl: null });
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isLoaded || !isSignedIn || !userId) return;
+    ensureUserRow(userId);
+    loadStateFromServer(userId);
+  }, [isLoaded, isSignedIn, userId, ensureUserRow, loadStateFromServer]);
 
   // Background sync: push state to server every 30s when logged in
   useEffect(() => {
-    if (!userId || authProvider === "anonymous") return;
+    if (!userId || !isSignedIn) return;
 
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -154,49 +120,19 @@ export function useAuth() {
       clearInterval(interval);
       window.removeEventListener("beforeunload", handleUnload);
     };
-  }, [userId, authProvider, syncStateToServer]);
+  }, [userId, isSignedIn, syncStateToServer]);
 
-  // ── Social login methods ──
-
-  const signInWithGoogle = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
-    if (error) console.error("Google sign-in failed:", error.message);
+  // ── Sign-in: open Clerk's sign-in modal ──
+  const signIn = () => {
+    clerk.openSignIn();
   };
 
-  const signInWithTwitter = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "twitter",
-      options: { redirectTo: window.location.origin },
-    });
-    if (error) console.error("Twitter sign-in failed:", error.message);
-  };
-
-  const upgradeAnonymous = async (provider) => {
-    if (!supabase) return;
-    await supabase.auth.linkIdentity({
-      provider,
-      options: { redirectTo: window.location.origin },
-    });
-  };
-
+  // ── Sign-out ──
   const signOut = async () => {
-    if (!supabase) return;
-    await supabase.auth.signOut();
-    // Re-sign in anonymously
-    const { data } = await supabase.auth.signInAnonymously();
-    if (data?.user) {
-      setUserId(data.user.id);
-      setAuthProvider("anonymous");
-    }
+    await clerkSignOut();
   };
 
-  // ── Wallet methods ──
-
+  // ── Wallet methods (unchanged) ──
   const connectWallet = async (address) => {
     setWalletAddress(address);
     localStorage.setItem("taste-wallet", address);
@@ -242,10 +178,10 @@ export function useAuth() {
     authProvider,
     userMeta,
     walletAddress,
-    loading,
-    signInWithGoogle,
-    signInWithTwitter,
-    upgradeAnonymous,
+    loading: !isLoaded,
+    isSignedIn: !!isSignedIn,
+    signIn,
+    signInWithTwitter: signIn, // kept for backward compat — opens Clerk modal
     signOut,
     connectWallet,
     connectMetaMask,
