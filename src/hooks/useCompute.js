@@ -27,6 +27,11 @@ import {
   claimMobileTask,
   submitMobileTask,
 } from "../api/compute";
+import {
+  claimTrainingJob,
+  submitTrainingResult,
+  fetchTrainingStats,
+} from "../api/training";
 
 /** Detect device compute capability: 'gpu', 'mobile', or 'cpu-only'. */
 function detectComputeCapability() {
@@ -78,6 +83,9 @@ export function useCompute(userId) {
   const [shardModels, setShardModels] = useState([]);
   const [shardStats, setShardStats] = useState(null);
   const [userShardJobs, setUserShardJobs] = useState([]);
+
+  // Training stats
+  const [trainingStats, setTrainingStats] = useState({ completedBatches: 0, latestEmbeddingAt: null });
 
   // Mobile mode state
   const [mobileTasksEnabled, setMobileTasksEnabled] = useState(false);
@@ -144,6 +152,11 @@ export function useCompute(userId) {
     detectGPU();
   }, []);
 
+  const refreshTrainingStats = useCallback(async () => {
+    const stats = await fetchTrainingStats();
+    if (stats) setTrainingStats(stats);
+  }, []);
+
   const refreshStats = useCallback(async () => {
     if (!userId) {
       // Still fetch public Shard data without userId
@@ -153,6 +166,7 @@ export function useCompute(userId) {
       ]);
       setShardModels(sModels);
       if (sStats) setShardStats(sStats);
+      refreshTrainingStats();
       return;
     }
     const [stats, mem, net, sModels, sStats, sJobs] = await Promise.all([
@@ -163,6 +177,7 @@ export function useCompute(userId) {
       fetchShardStats(),
       fetchUserShardJobs(userId),
     ]);
+    refreshTrainingStats();
     if (stats) {
       setWorkerStats(stats);
       setTrustScore({
@@ -221,12 +236,28 @@ export function useCompute(userId) {
         }
 
         if (msg.type === "result" && msg.jobId === job.id) {
-          const earned = await submitJobResult(
-            job.id,
-            workerIdRef.current,
-            msg.resultEncrypted,
-            msg.resultHash
-          );
+          let earned;
+          if (job.job_type === "taste_training") {
+            // Parse training result and submit embeddings
+            try {
+              const resultStr = atob(msg.resultEncrypted);
+              const result = JSON.parse(resultStr);
+              earned = await submitTrainingResult(
+                job.id,
+                workerIdRef.current,
+                result.embeddings || {}
+              );
+            } catch {
+              earned = { coins: 0, usdc: 0 };
+            }
+          } else {
+            earned = await submitJobResult(
+              job.id,
+              workerIdRef.current,
+              msg.resultEncrypted,
+              msg.resultHash
+            );
+          }
           setJobsThisSession((j) => j + 1);
           if (earned.coins > 0) setCoinsThisSession((c) => c + earned.coins);
           if (earned.usdc > 0) setUsdcThisSession((u) => u + Number(earned.usdc));
@@ -252,16 +283,30 @@ export function useCompute(userId) {
     [ensureWorker, refreshStats]
   );
 
-  // Poll for jobs
+  // Poll for jobs (regular inference first, then training jobs when idle)
   const pollForJob = useCallback(async () => {
     if (!enabledRef.current || !workerIdRef.current || busyRef.current) return;
 
+    // Try regular inference/benchmark jobs first
     const jobId = await claimJob(workerIdRef.current);
-    if (!jobId) return;
+    if (jobId) {
+      const job = await fetchJobPayload(jobId);
+      if (job) {
+        executeJob(job);
+        return;
+      }
+    }
 
-    const job = await fetchJobPayload(jobId);
-    if (job) {
-      executeJob(job);
+    // No inference jobs — try claiming a taste training job
+    const trainingJob = await claimTrainingJob(workerIdRef.current);
+    if (trainingJob) {
+      // Wrap training batch as a job-like object for executeJob
+      const batchPayload = btoa(JSON.stringify(trainingJob));
+      executeJob({
+        id: trainingJob.batch_id,
+        job_type: "taste_training",
+        payload_encrypted: batchPayload,
+      });
     }
   }, [executeJob]);
 
@@ -707,6 +752,8 @@ export function useCompute(userId) {
     shardStats,
     userShardJobs,
     refreshStats,
+    // Training stats
+    trainingStats,
     // Pipeline mode
     pipelineMode,
     pipelineStatus,

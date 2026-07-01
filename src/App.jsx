@@ -594,7 +594,7 @@ export default function App() {
           </p>
         </main>
       ) : view === "polls" ? (
-        <TrendingPolls polls={POLLS} onSelectPoll={handleSelectPoll} userPrefs={store.current.getPrefs()} />
+        <TrendingPolls polls={POLLS} onSelectPoll={handleSelectPoll} userPrefs={store.current.getPrefs()} userId={userId} />
       ) : view === "pollArena" && activePoll ? (
         <PollArena poll={activePoll} onVote={handlePollVote} onBack={handlePollBack} />
       ) : view === "speedRound" ? (
@@ -651,6 +651,7 @@ export default function App() {
           mobileTasksThisSession={compute.mobileTasksThisSession}
           currentMobileTask={compute.currentMobileTask}
           submitMobileTaskResult={compute.submitMobileTaskResult}
+          trainingStats={compute.trainingStats}
         />
       ) : view === "profile" ? (
         <Profile

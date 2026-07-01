@@ -2002,5 +2002,513 @@ begin
 end;
 $$ language plpgsql security definer;
 
+-- ══════════════════════════════════════════════════════════════════
+-- Closed-Loop Taste Training + Mysteries + Taste Twins
+-- ══════════════════════════════════════════════════════════════════
+
+-- Training batches queued for GPU workers
+create table if not exists taste_training_batches (
+  id uuid primary key default gen_random_uuid(),
+  batch_data jsonb not null default '{}'::jsonb,
+  batch_size integer not null default 0,
+  status text not null default 'pending'
+    check (status in ('pending', 'assigned', 'completed', 'failed')),
+  assigned_worker_id uuid references compute_workers(id),
+  result_embeddings jsonb,
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_training_batches_status on taste_training_batches(status);
+
+alter table taste_training_batches enable row level security;
+create policy "Training batches are publicly readable" on taste_training_batches
+  for select using (true);
+create policy "Training batches are publicly insertable" on taste_training_batches
+  for insert with check (true);
+create policy "Training batches are publicly updatable" on taste_training_batches
+  for update using (true);
+
+-- Item embedding vectors computed by workers
+create table if not exists taste_embeddings (
+  id uuid primary key default gen_random_uuid(),
+  item_id text unique not null,
+  embedding_vector jsonb not null default '[]'::jsonb,
+  category text,
+  version integer not null default 1,
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_taste_embeddings_item on taste_embeddings(item_id);
+create index if not exists idx_taste_embeddings_category on taste_embeddings(category);
+
+alter table taste_embeddings enable row level security;
+create policy "Taste embeddings are publicly readable" on taste_embeddings
+  for select using (true);
+
+-- Weekly mystery cards surfacing hidden correlations
+create table if not exists taste_mysteries (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  description text not null,
+  mystery_type text not null default 'correlation'
+    check (mystery_type in ('correlation', 'upset', 'crossover')),
+  payload jsonb not null default '{}'::jsonb,
+  status text not null default 'active'
+    check (status in ('active', 'resolved', 'expired')),
+  vote_count integer not null default 0,
+  expires_at timestamptz default now() + interval '7 days',
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_taste_mysteries_status on taste_mysteries(status);
+create index if not exists idx_taste_mysteries_expires on taste_mysteries(expires_at);
+
+alter table taste_mysteries enable row level security;
+create policy "Taste mysteries are publicly readable" on taste_mysteries
+  for select using (true);
+
+-- User-submitted theories for mysteries
+create table if not exists mystery_explanations (
+  id uuid primary key default gen_random_uuid(),
+  mystery_id uuid not null references taste_mysteries(id) on delete cascade,
+  user_id text not null references users(id),
+  explanation text not null,
+  upvotes integer not null default 0,
+  coins_awarded integer not null default 0,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_mystery_explanations_mystery on mystery_explanations(mystery_id);
+create index if not exists idx_mystery_explanations_user on mystery_explanations(user_id);
+
+alter table mystery_explanations enable row level security;
+create policy "Mystery explanations are publicly readable" on mystery_explanations
+  for select using (true);
+create policy "Mystery explanations are publicly insertable" on mystery_explanations
+  for insert with check (true);
+
+-- Twin/nemesis pairs per user
+create table if not exists taste_matches (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references users(id),
+  match_user_id text not null references users(id),
+  similarity_score numeric(5,4) not null default 0,
+  match_type text not null default 'twin'
+    check (match_type in ('twin', 'nemesis')),
+  category_breakdown jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  constraint taste_matches_unique unique (user_id, match_user_id, match_type)
+);
+
+create index if not exists idx_taste_matches_user on taste_matches(user_id);
+
+alter table taste_matches enable row level security;
+create policy "Taste matches are publicly readable" on taste_matches
+  for select using (true);
+
+-- ── generate_training_batch RPC ──────────────────────────────────
+-- Pulls recent high-quality votes + item metadata into a pending batch
+create or replace function generate_training_batch(
+  p_batch_size integer default 50
+) returns uuid as $$
+declare
+  v_batch_id uuid;
+  v_pairs jsonb;
+begin
+  select jsonb_agg(pair) into v_pairs
+  from (
+    select jsonb_build_object(
+      'winner_id', v.winner_id,
+      'loser_id', v.loser_id,
+      'winner_name', wi.name,
+      'loser_name', li.name,
+      'winner_cat', wi.cat,
+      'loser_cat', li.cat,
+      'quality_score', v.quality_score
+    ) as pair
+    from votes v
+    join items wi on wi.id = v.winner_id
+    join items li on li.id = v.loser_id
+    where v.quality_score >= 0.6
+      and v.source = 'human'
+      and v.created_at > now() - interval '7 days'
+    order by v.created_at desc
+    limit p_batch_size
+  ) recent_pairs;
+
+  if v_pairs is null or jsonb_array_length(v_pairs) < 5 then
+    return null;
+  end if;
+
+  insert into taste_training_batches (batch_data, batch_size, status)
+  values (v_pairs, jsonb_array_length(v_pairs), 'pending')
+  returning id into v_batch_id;
+
+  return v_batch_id;
+end;
+$$ language plpgsql security definer;
+
+-- ── claim_training_job RPC ───────────────────────────────────────
+-- Atomic claim of oldest pending batch (skip locked)
+create or replace function claim_training_job(
+  p_worker_id uuid
+) returns jsonb as $$
+declare
+  v_batch record;
+begin
+  select * into v_batch
+  from taste_training_batches
+  where status = 'pending'
+  order by created_at asc
+  limit 1
+  for update skip locked;
+
+  if v_batch is null then
+    return null;
+  end if;
+
+  update taste_training_batches
+  set status = 'assigned',
+      assigned_worker_id = p_worker_id
+  where id = v_batch.id;
+
+  return jsonb_build_object(
+    'batch_id', v_batch.id,
+    'batch_data', v_batch.batch_data,
+    'batch_size', v_batch.batch_size
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── submit_training_result RPC ───────────────────────────────────
+-- Stores embeddings, awards 20 coins + $0.001
+create or replace function submit_training_result(
+  p_batch_id uuid,
+  p_worker_id uuid,
+  p_result_embeddings jsonb
+) returns jsonb as $$
+declare
+  v_batch record;
+  v_user_id text;
+  v_item record;
+  v_coins integer := 20;
+  v_usdc numeric(12,6) := 0.001;
+begin
+  select * into v_batch
+  from taste_training_batches
+  where id = p_batch_id
+    and assigned_worker_id = p_worker_id
+    and status = 'assigned'
+  for update;
+
+  if v_batch is null then
+    return jsonb_build_object('coins', 0, 'usdc', 0);
+  end if;
+
+  update taste_training_batches
+  set status = 'completed',
+      result_embeddings = p_result_embeddings,
+      completed_at = now()
+  where id = p_batch_id;
+
+  -- Upsert embeddings for each item
+  for v_item in
+    select key as item_id, value as vector
+    from jsonb_each(p_result_embeddings)
+  loop
+    insert into taste_embeddings (item_id, embedding_vector, version, updated_at)
+    values (v_item.item_id, v_item.vector, 1, now())
+    on conflict (item_id) do update set
+      embedding_vector = excluded.embedding_vector,
+      version = taste_embeddings.version + 1,
+      updated_at = now();
+  end loop;
+
+  -- Award coins and USDC
+  select user_id into v_user_id
+  from compute_workers where id = p_worker_id;
+
+  if v_user_id is not null then
+    perform award_coins(v_user_id, v_coins, 'taste_training', p_batch_id::text);
+
+    update users
+    set total_earned_usdc = total_earned_usdc + v_usdc
+    where id = v_user_id;
+
+    update compute_workers
+    set total_jobs = total_jobs + 1,
+        total_coins_earned = total_coins_earned + v_coins,
+        total_usdc_earned = total_usdc_earned + v_usdc
+    where id = p_worker_id;
+  end if;
+
+  return jsonb_build_object('coins', v_coins, 'usdc', v_usdc);
+end;
+$$ language plpgsql security definer;
+
+-- ── generate_taste_mystery RPC ───────────────────────────────────
+-- Analyzes vote patterns, creates a mystery (correlation, upset, or crossover)
+create or replace function generate_taste_mystery() returns uuid as $$
+declare
+  v_mystery_id uuid;
+  v_type text;
+  v_title text;
+  v_description text;
+  v_payload jsonb;
+  v_roll integer;
+  v_item_a record;
+  v_item_b record;
+  v_cat_a text;
+  v_cat_b text;
+begin
+  v_roll := floor(random() * 3)::integer;
+
+  if v_roll = 0 then
+    -- Correlation: two items that are co-preferred
+    v_type := 'correlation';
+    select wi.id, wi.name, wi.cat, count(*) as co_wins
+    into v_item_a
+    from votes v1
+    join votes v2 on v2.user_id = v1.user_id
+      and v2.winner_id != v1.winner_id
+      and v2.created_at > now() - interval '7 days'
+    join items wi on wi.id = v1.winner_id
+    where v1.created_at > now() - interval '7 days'
+      and v1.source = 'human'
+    group by wi.id, wi.name, wi.cat
+    order by co_wins desc
+    limit 1;
+
+    if v_item_a is null then return null; end if;
+
+    select wi.id, wi.name, wi.cat
+    into v_item_b
+    from votes v1
+    join votes v2 on v2.user_id = v1.user_id and v2.winner_id != v1.winner_id
+    join items wi on wi.id = v2.winner_id
+    where v1.winner_id = v_item_a.id
+      and v1.created_at > now() - interval '7 days'
+      and wi.id != v_item_a.id
+    group by wi.id, wi.name, wi.cat
+    order by count(*) desc
+    limit 1;
+
+    if v_item_b is null then return null; end if;
+
+    v_title := 'Hidden Connection: ' || v_item_a.name || ' & ' || v_item_b.name;
+    v_description := 'People who prefer ' || v_item_a.name || ' also tend to prefer ' || v_item_b.name || '. Why might these be linked?';
+    v_payload := jsonb_build_object('item_a', v_item_a.id, 'item_b', v_item_b.id);
+
+  elsif v_roll = 1 then
+    -- Upset: item that wins despite lower rating
+    v_type := 'upset';
+    select wi.id, wi.name, wi.cat, wi.rating as winner_rating,
+           li.id as loser_id, li.name as loser_name, li.rating as loser_rating,
+           count(*) as upset_count
+    into v_item_a
+    from votes v
+    join items wi on wi.id = v.winner_id
+    join items li on li.id = v.loser_id
+    where v.created_at > now() - interval '7 days'
+      and wi.rating < li.rating - 50
+      and v.source = 'human'
+    group by wi.id, wi.name, wi.cat, wi.rating, li.id, li.name, li.rating
+    order by upset_count desc
+    limit 1;
+
+    if v_item_a is null then return null; end if;
+
+    v_title := 'Giant Killer: ' || v_item_a.name;
+    v_description := v_item_a.name || ' keeps beating higher-ranked ' || v_item_a.loser_name || '. What''s the underdog appeal?';
+    v_payload := jsonb_build_object('winner_id', v_item_a.id, 'loser_id', v_item_a.loser_id, 'upset_count', v_item_a.upset_count);
+
+  else
+    -- Crossover: cross-category preference pattern
+    v_type := 'crossover';
+    select v.winner_id, wi.name, wi.cat as winner_cat,
+           v.loser_id, li.name as loser_name, li.cat as loser_cat,
+           count(*) as cross_count
+    into v_item_a
+    from votes v
+    join items wi on wi.id = v.winner_id
+    join items li on li.id = v.loser_id
+    where v.created_at > now() - interval '7 days'
+      and wi.cat != li.cat
+      and v.source = 'human'
+    group by v.winner_id, wi.name, wi.cat, v.loser_id, li.name, li.cat
+    order by cross_count desc
+    limit 1;
+
+    if v_item_a is null then return null; end if;
+
+    v_title := 'Taste Crossover: ' || v_item_a.winner_cat || ' vs ' || v_item_a.loser_cat;
+    v_description := v_item_a.name || ' (' || v_item_a.winner_cat || ') keeps winning over ' || v_item_a.loser_name || ' (' || v_item_a.loser_cat || '). What drives cross-category preferences?';
+    v_payload := jsonb_build_object('winner_id', v_item_a.winner_id, 'loser_id', v_item_a.loser_id, 'winner_cat', v_item_a.winner_cat, 'loser_cat', v_item_a.loser_cat);
+  end if;
+
+  insert into taste_mysteries (title, description, mystery_type, payload, status, expires_at)
+  values (v_title, v_description, v_type, v_payload, 'active', now() + interval '7 days')
+  returning id into v_mystery_id;
+
+  return v_mystery_id;
+end;
+$$ language plpgsql security definer;
+
+-- ── compute_taste_matches RPC ────────────────────────────────────
+-- Compares user's category win-rates against all others via cosine similarity
+create or replace function compute_taste_matches(
+  p_user_id text
+) returns jsonb as $$
+declare
+  v_user_prefs jsonb;
+  v_other record;
+  v_best_twin record;
+  v_best_nemesis record;
+  v_best_twin_score numeric := -1;
+  v_best_nemesis_score numeric := 2;
+  v_similarity numeric;
+  v_categories text[];
+  v_user_vec numeric[];
+  v_other_vec numeric[];
+  v_dot numeric;
+  v_mag_a numeric;
+  v_mag_b numeric;
+  v_cat_breakdown jsonb;
+begin
+  -- Build user's category win-rate vector
+  select array_agg(win_rate order by cat), array_agg(cat order by cat)
+  into v_user_vec, v_categories
+  from (
+    select wi.cat,
+           count(*) filter (where v.winner_id = v.winner_id)::numeric /
+           nullif(count(*), 0) as win_rate
+    from votes v
+    join items wi on wi.id = v.winner_id
+    where v.user_id = p_user_id
+      and v.source = 'human'
+      and wi.cat is not null
+    group by wi.cat
+  ) user_cats;
+
+  if v_user_vec is null or array_length(v_user_vec, 1) < 2 then
+    return jsonb_build_object('twin', null, 'nemesis', null);
+  end if;
+
+  -- Compare against other users
+  for v_other in
+    select distinct user_id from votes
+    where user_id != p_user_id and source = 'human'
+    limit 100
+  loop
+    select array_agg(coalesce(win_rate, 0) order by cat)
+    into v_other_vec
+    from (
+      select unnest(v_categories) as cat
+    ) cats
+    left join (
+      select wi.cat,
+             count(*)::numeric / nullif((select count(*) from votes where user_id = v_other.user_id), 0) as win_rate
+      from votes v
+      join items wi on wi.id = v.winner_id
+      where v.user_id = v_other.user_id and v.source = 'human' and wi.cat is not null
+      group by wi.cat
+    ) other_cats using (cat);
+
+    if v_other_vec is null then continue; end if;
+
+    -- Cosine similarity
+    v_dot := 0; v_mag_a := 0; v_mag_b := 0;
+    for i in 1..array_length(v_user_vec, 1) loop
+      v_dot := v_dot + v_user_vec[i] * coalesce(v_other_vec[i], 0);
+      v_mag_a := v_mag_a + v_user_vec[i] * v_user_vec[i];
+      v_mag_b := v_mag_b + coalesce(v_other_vec[i], 0) * coalesce(v_other_vec[i], 0);
+    end loop;
+
+    if v_mag_a > 0 and v_mag_b > 0 then
+      v_similarity := v_dot / (sqrt(v_mag_a) * sqrt(v_mag_b));
+    else
+      v_similarity := 0;
+    end if;
+
+    if v_similarity > v_best_twin_score then
+      v_best_twin_score := v_similarity;
+      v_best_twin := v_other;
+    end if;
+
+    if v_similarity < v_best_nemesis_score then
+      v_best_nemesis_score := v_similarity;
+      v_best_nemesis := v_other;
+    end if;
+  end loop;
+
+  -- Upsert twin
+  if v_best_twin is not null then
+    v_cat_breakdown := '{}';
+    for i in 1..array_length(v_categories, 1) loop
+      v_cat_breakdown := v_cat_breakdown || jsonb_build_object(v_categories[i], round(v_user_vec[i]::numeric, 3));
+    end loop;
+
+    insert into taste_matches (user_id, match_user_id, similarity_score, match_type, category_breakdown, updated_at)
+    values (p_user_id, v_best_twin.user_id, v_best_twin_score, 'twin', v_cat_breakdown, now())
+    on conflict (user_id, match_user_id, match_type) do update set
+      similarity_score = excluded.similarity_score,
+      category_breakdown = excluded.category_breakdown,
+      updated_at = now();
+  end if;
+
+  -- Upsert nemesis
+  if v_best_nemesis is not null then
+    v_cat_breakdown := '{}';
+    for i in 1..array_length(v_categories, 1) loop
+      v_cat_breakdown := v_cat_breakdown || jsonb_build_object(v_categories[i], round(v_user_vec[i]::numeric, 3));
+    end loop;
+
+    insert into taste_matches (user_id, match_user_id, similarity_score, match_type, category_breakdown, updated_at)
+    values (p_user_id, v_best_nemesis.user_id, 1 - v_best_nemesis_score, 'nemesis', v_cat_breakdown, now())
+    on conflict (user_id, match_user_id, match_type) do update set
+      similarity_score = excluded.similarity_score,
+      category_breakdown = excluded.category_breakdown,
+      updated_at = now();
+  end if;
+
+  return jsonb_build_object(
+    'twin', case when v_best_twin is not null then jsonb_build_object(
+      'user_id', v_best_twin.user_id,
+      'similarity', round(v_best_twin_score::numeric, 4)
+    ) else null end,
+    'nemesis', case when v_best_nemesis is not null then jsonb_build_object(
+      'user_id', v_best_nemesis.user_id,
+      'divergence', round((1 - v_best_nemesis_score)::numeric, 4)
+    ) else null end
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ── fetch_active_mysteries RPC ───────────────────────────────────
+-- Returns active unexpired mysteries sorted by weight
+create or replace function fetch_active_mysteries(
+  p_limit integer default 3
+) returns jsonb as $$
+declare
+  v_mysteries jsonb;
+begin
+  select jsonb_agg(m order by m.vote_count desc, m.created_at desc)
+  into v_mysteries
+  from (
+    select id, title, description, mystery_type, payload, vote_count, expires_at, created_at,
+           (select count(*) from mystery_explanations where mystery_id = taste_mysteries.id) as theory_count
+    from taste_mysteries
+    where status = 'active'
+      and expires_at > now()
+    order by vote_count desc, created_at desc
+    limit p_limit
+  ) m;
+
+  return coalesce(v_mysteries, '[]'::jsonb);
+end;
+$$ language plpgsql security definer;
+
 -- Reload PostgREST schema cache so all RPCs are discoverable
 notify pgrst, 'reload schema';

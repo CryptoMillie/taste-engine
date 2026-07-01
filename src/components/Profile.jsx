@@ -5,6 +5,7 @@ import { supabase } from "../api/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { fetchCoinHistory } from "../api/coins";
 import { fetchRlhfStats, toggleRlhfOptIn } from "../api/reputation";
+import { fetchTasteMatches, computeTasteMatches } from "../api/taste-matches";
 import ApiKeys from "./ApiKeys";
 
 function ApiKeysSection({ userId }) {
@@ -35,6 +36,24 @@ export default function Profile({
   const [recentStakes, setRecentStakes] = useState([]);
   const [coinHistory, setCoinHistory] = useState([]);
   const [rlhfStats, setRlhfStats] = useState({ highQualityVotes: 0, dividendsEarned: 0, optedIn: true });
+  const [tasteMatches, setTasteMatches] = useState({ twin: null, nemesis: null });
+
+  useEffect(() => {
+    if (!userId) return;
+    // Fetch existing matches
+    fetchTasteMatches(userId).then(setTasteMatches).catch(() => {});
+    // Trigger fresh computation in background after 2s
+    const timer = setTimeout(() => {
+      computeTasteMatches(userId)
+        .then((result) => {
+          if (result?.twin || result?.nemesis) {
+            fetchTasteMatches(userId).then(setTasteMatches).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [userId]);
 
   useEffect(() => {
     if (!supabase || !userId) return;
@@ -315,6 +334,74 @@ export default function Profile({
             Reputation decays if inactive for 3+ days. Keep voting to maintain your multiplier.
           </div>
         </div>
+
+        {/* Taste Twin */}
+        {tasteMatches.twin && (
+          <div style={{ ...sectionStyle, marginBottom: 0 }}>
+            <div
+              className="mono"
+              style={{ fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10 }}
+            >
+              TASTE TWIN
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: "50%",
+                background: "linear-gradient(135deg, #7c3aed, #a78bfa)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 22, fontWeight: 800, color: "#fff",
+              }}>
+                {(tasteMatches.twin.match_user_id || "?").charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 800, color: "#7c3aed" }}>
+                  {Math.round(Number(tasteMatches.twin.similarity_score) * 100)}%
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>similarity match</div>
+              </div>
+            </div>
+            <div style={{
+              marginTop: 10, fontSize: 12, color: T.soft,
+              padding: "8px 10px", background: T.paper, borderRadius: 8,
+            }}>
+              {Object.keys(tasteMatches.twin.category_breakdown || {}).length} categories in common
+            </div>
+          </div>
+        )}
+
+        {/* Taste Nemesis */}
+        {tasteMatches.nemesis && (
+          <div style={{ ...sectionStyle, marginBottom: 0 }}>
+            <div
+              className="mono"
+              style={{ fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 10 }}
+            >
+              TASTE NEMESIS
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: "50%",
+                background: "linear-gradient(135deg, #dc2626, #f87171)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 22, fontWeight: 800, color: "#fff",
+              }}>
+                {(tasteMatches.nemesis.match_user_id || "?").charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="disp" style={{ fontSize: 28, fontWeight: 800, color: "#dc2626" }}>
+                  {Math.round(Number(tasteMatches.nemesis.similarity_score) * 100)}%
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>divergence score</div>
+              </div>
+            </div>
+            <div style={{
+              marginTop: 10, fontSize: 12, color: T.soft,
+              padding: "8px 10px", background: T.paper, borderRadius: 8,
+            }}>
+              {Object.keys(tasteMatches.nemesis.category_breakdown || {}).length} categories of disagreement
+            </div>
+          </div>
+        )}
 
         {/* RLHF Data Contributions */}
         <div style={{ ...sectionStyle, marginBottom: 0 }}>

@@ -4,6 +4,8 @@ import { POLL_CATEGORIES } from "../data/polls";
 import { fetchHeadToHead } from "../api/stats";
 import { fetchLiveTrending } from "../api/trending";
 import { fetchTrendingFromDesearch } from "../api/desearch";
+import { fetchActiveMysteries, submitMysteryExplanation } from "../api/mysteries";
+import MysteryCard from "./MysteryCard";
 
 const VOTED_KEY = "taste-polls-voted";
 
@@ -261,11 +263,21 @@ function PollCard({ poll, voteData, onSelect, isLive }) {
 }
 
 
-export default function TrendingPolls({ polls, onSelectPoll, userPrefs }) {
+export default function TrendingPolls({ polls, onSelectPoll, userPrefs, userId }) {
   const [activeCategory, setActiveCategory] = useState("All");
   const [liveMatchups, setLiveMatchups] = useState([]);
   const [liveLoading, setLiveLoading] = useState(true);
+  const [mysteries, setMysteries] = useState([]);
   const votedPolls = getVotedPolls();
+
+  // Fetch mysteries on mount
+  useEffect(() => {
+    fetchActiveMysteries(3).then((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setMysteries(data);
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     // Timeout guard: never show loading spinner for more than 8 seconds
@@ -385,7 +397,21 @@ export default function TrendingPolls({ polls, onSelectPoll, userPrefs }) {
     scored.push({ poll: p, weight: 50 - i * 0.5 + affinityBoost });
   });
 
-  // Sort by weight descending — live/trending content surfaces first
+  // Inject mysteries as highest-priority items
+  mysteries.forEach((m, i) => {
+    scored.push({
+      poll: {
+        id: `mystery_${m.id}`,
+        _isMystery: true,
+        _mysteryData: m,
+        category: "Mystery",
+        label: m.title,
+      },
+      weight: 200 - i,
+    });
+  });
+
+  // Sort by weight descending — mysteries first, then live/trending, then curated
   scored.sort((a, b) => b.weight - a.weight);
   const combined = scored.map((s) => s.poll);
 
@@ -487,15 +513,26 @@ export default function TrendingPolls({ polls, onSelectPoll, userPrefs }) {
             gap: 18,
           }}
         >
-          {combined.map((poll) => (
-            <PollCard
-              key={poll.id}
-              poll={poll}
-              voteData={votedPolls[poll.id] || null}
-              onSelect={onSelectPoll}
-              isLive={!!poll._isLive}
-            />
-          ))}
+          {combined.map((poll) =>
+            poll._isMystery ? (
+              <MysteryCard
+                key={poll.id}
+                mystery={poll._mysteryData}
+                userId={userId}
+                onSubmitTheory={async (mysteryId, explanation) => {
+                  await submitMysteryExplanation(mysteryId, userId, explanation);
+                }}
+              />
+            ) : (
+              <PollCard
+                key={poll.id}
+                poll={poll}
+                voteData={votedPolls[poll.id] || null}
+                onSelect={onSelectPoll}
+                isLive={!!poll._isLive}
+              />
+            )
+          )}
         </div>
       )}
     </div>

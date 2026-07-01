@@ -59,6 +59,7 @@ export default function ComputeDashboard({
   mobileTasksThisSession,
   currentMobileTask,
   submitMobileTaskResult,
+  trainingStats,
 }) {
   const [rlhfStats, setRlhfStats] = useState({ highQualityVotes: 0, dividendsEarned: 0, optedIn: true });
   useEffect(() => {
@@ -512,6 +513,7 @@ export default function ComputeDashboard({
                 <div style={{ fontSize: 13, fontWeight: 500 }}>
                   {currentJob.job_type === "inference" ? "Running inference..." :
                    currentJob.job_type === "benchmark" ? "Running benchmark..." :
+                   currentJob.job_type === "taste_training" ? "Training taste model..." :
                    "Processing job..."}
                   <span style={{ color: "#16a34a", marginLeft: 6 }}>
                     +${Number(currentJob.usdc_reward || 0.0005).toFixed(4)}
@@ -700,6 +702,45 @@ export default function ComputeDashboard({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Taste Model Training Stats */}
+        {trainingStats && (
+          <div style={{ ...sectionStyle, marginBottom: 0 }}>
+            <div className="mono" style={{
+              fontSize: 10, color: T.soft, letterSpacing: "0.16em", marginBottom: 12,
+            }}>
+              TASTE MODEL
+            </div>
+            <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+              <div>
+                <div className="disp" style={{ fontSize: 32, fontWeight: 800, color: "#7c3aed" }}>
+                  {trainingStats.completedBatches}
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>Batches trained</div>
+              </div>
+              <div>
+                <div className="disp" style={{ fontSize: 32, fontWeight: 800, color: T.ink }}>
+                  {trainingStats.latestEmbeddingAt
+                    ? `${Math.max(0, Math.round((Date.now() - new Date(trainingStats.latestEmbeddingAt).getTime()) / 3600000))}h`
+                    : "—"}
+                </div>
+                <div style={{ fontSize: 12, color: T.soft }}>Model age</div>
+              </div>
+            </div>
+            {currentJob?.job_type === "taste_training" && (
+              <div style={{
+                padding: "8px 12px", background: "#7c3aed18",
+                borderRadius: 10, fontSize: 13, color: "#7c3aed", fontWeight: 600,
+                marginBottom: 8,
+              }}>
+                Training taste embeddings...
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: T.soft, lineHeight: 1.5 }}>
+              Workers train taste embeddings from vote patterns. Training jobs are claimed when no inference jobs are available.
+            </div>
           </div>
         )}
 

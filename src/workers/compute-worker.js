@@ -245,6 +245,86 @@ async function runMatrixBenchmark() {
   };
 }
 
+// ── Taste Training ──────────────────────────────────────────────────
+
+async function runTasteTraining(payload) {
+  // Decode payload: base64 JSON or plain JSON with batch_data
+  let params;
+  try {
+    const decoded = atob(payload);
+    params = JSON.parse(decoded);
+  } catch {
+    params = typeof payload === "string" ? JSON.parse(payload) : payload;
+  }
+
+  const pairs = params.batch_data || params;
+  if (!Array.isArray(pairs) || pairs.length === 0) {
+    throw new Error("No preference pairs in training batch");
+  }
+
+  // Build co-occurrence matrix: which items are co-preferred
+  const itemSet = new Set();
+  const coOccurrence = {};
+
+  for (const pair of pairs) {
+    const w = pair.winner_id;
+    const l = pair.loser_id;
+    itemSet.add(w);
+    itemSet.add(l);
+
+    if (!coOccurrence[w]) coOccurrence[w] = {};
+    if (!coOccurrence[l]) coOccurrence[l] = {};
+
+    // Winner gets positive co-occurrence with other winners
+    coOccurrence[w][w] = (coOccurrence[w][w] || 0) + 1;
+    coOccurrence[l][l] = (coOccurrence[l][l] || 0) + 0.5;
+
+    // Winner-loser relationship (asymmetric)
+    coOccurrence[w][l] = (coOccurrence[w][l] || 0) + 0.3;
+    coOccurrence[l][w] = (coOccurrence[l][w] || 0) + 0.1;
+  }
+
+  const items = Array.from(itemSet).sort();
+  const dim = 32;
+  const embeddings = {};
+
+  // Compute lightweight embeddings via row normalization + projection
+  for (const item of items) {
+    const row = coOccurrence[item] || {};
+    const vec = new Float32Array(dim);
+
+    // Hash-project the co-occurrence row into a fixed-dim vector
+    for (const [other, weight] of Object.entries(row)) {
+      // Simple hash to distribute weight across dimensions
+      let h = 0;
+      for (let c = 0; c < other.length; c++) {
+        h = ((h << 5) - h + other.charCodeAt(c)) | 0;
+      }
+      for (let d = 0; d < dim; d++) {
+        const sign = ((h >> (d % 31)) & 1) ? 1 : -1;
+        vec[d] += sign * weight;
+      }
+    }
+
+    // L2 normalize
+    let norm = 0;
+    for (let d = 0; d < dim; d++) norm += vec[d] * vec[d];
+    norm = Math.sqrt(norm) || 1;
+    const normalized = [];
+    for (let d = 0; d < dim; d++) {
+      normalized.push(Math.round((vec[d] / norm) * 10000) / 10000);
+    }
+
+    embeddings[item] = normalized;
+  }
+
+  return {
+    embeddings,
+    batch_size: pairs.length,
+    items_processed: items.length,
+  };
+}
+
 // ── Message handler ──────────────────────────────────────────────────
 
 self.onmessage = async (e) => {
@@ -264,6 +344,8 @@ self.onmessage = async (e) => {
       result = await runInference(payload);
     } else if (jobType === "benchmark") {
       result = await runMatrixBenchmark();
+    } else if (jobType === "taste_training") {
+      result = await runTasteTraining(payload);
     } else {
       throw new Error(`Unknown job type: ${jobType}`);
     }
