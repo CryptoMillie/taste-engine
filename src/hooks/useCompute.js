@@ -30,11 +30,13 @@ import {
 
 /** Detect device compute capability: 'gpu', 'mobile', or 'cpu-only'. */
 function detectComputeCapability() {
-  const isTouchDevice = navigator.maxTouchPoints > 2;
+  const isTouchDevice = navigator.maxTouchPoints > 0;
   const isSmallScreen = window.innerWidth < 1024;
   const ua = navigator.userAgent || "";
   const isMobileUA = /iPhone|iPad|iPod|Android|Mobile|webOS/i.test(ua);
-  if (isTouchDevice && (isSmallScreen || isMobileUA)) return "mobile";
+  // Mobile phones should always get micro-tasks, even if WebGPU exists
+  if (isMobileUA && (isTouchDevice || isSmallScreen)) return "mobile";
+  if (isTouchDevice && isSmallScreen) return "mobile";
   if (navigator.gpu) return "gpu";
   return "cpu-only";
 }
@@ -90,7 +92,8 @@ export function useCompute(userId) {
   useEffect(() => { mobileEnabledRef.current = mobileTasksEnabled; }, [mobileTasksEnabled]);
 
   // Derived compute mode: 'gpu' | 'mobile' | 'unavailable'
-  const computeMode = gpuAvailable ? "gpu" : computeCapability === "mobile" ? "mobile" : "unavailable";
+  // Mobile always wins — phones shouldn't run WebGPU inference even if technically available
+  const computeMode = computeCapability === "mobile" ? "mobile" : gpuAvailable ? "gpu" : "unavailable";
 
   // Pipeline mode state
   const [pipelineMode, setPipelineMode] = useState(false);

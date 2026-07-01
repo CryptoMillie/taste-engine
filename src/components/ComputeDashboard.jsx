@@ -86,7 +86,7 @@ export default function ComputeDashboard({
     ? Math.max(mobileTasksThisSession * (mobileRate.coinsPerHour / 60), mobileSessionHours * mobileRate.coinsPerHour)
     : 0;
 
-  if (!gpuAvailable && computeMode === "mobile") {
+  if (computeMode === "mobile") {
     return (
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "20px 22px 52px" }}>
         <h2 className="disp" style={{ fontSize: 42, fontWeight: 800, marginBottom: 4 }}>
