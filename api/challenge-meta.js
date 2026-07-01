@@ -82,5 +82,6 @@ export default function handler(req, res) {
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "public, s-maxage=86400, max-age=3600");
+  res.setHeader("Vary", "User-Agent");
   res.status(200).send(html);
 }
