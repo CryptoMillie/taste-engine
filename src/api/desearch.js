@@ -26,6 +26,7 @@ const CATEGORY_QUERIES = {
   gaming: "most popular video games and esports 2026 site:wikipedia.org",
   finance: "top investors billionaires companies stocks crypto 2026 site:wikipedia.org",
   space: "space exploration missions planets NASA SpaceX 2026 site:wikipedia.org",
+  debates: "biggest controversies conspiracy theories debates 2026 site:wikipedia.org",
 };
 
 /**
@@ -185,7 +186,7 @@ export async function fetchTrendingFromDesearch() {
   }
 
   // Fetch priority categories in parallel
-  const priorityCats = ["trending", "sports", "music", "food", "movies", "anime", "gaming", "finance", "space"];
+  const priorityCats = ["trending", "sports", "music", "food", "movies", "anime", "gaming", "finance", "space", "debates"];
   const results = await Promise.allSettled(
     priorityCats.map((cat) => fetchCategoryFromDesearch(cat, 8))
   );
