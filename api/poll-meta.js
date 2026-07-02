@@ -35,6 +35,10 @@ const POLLS = {
   "poll-nasa-spacex": { a: "NASA", b: "SpaceX", label: "Who leads space exploration?" },
   "poll-mars-moon": { a: "Mars", b: "The Moon", label: "Where should we go next?" },
   "poll-hubble-jwst": { a: "Hubble", b: "James Webb", label: "Greatest space telescope" },
+  "poll-flatearth-globe": { a: "Flat Earth", b: "Globe Earth", label: "Shape of the Earth" },
+  "poll-aliens-alone": { a: "Aliens Exist", b: "We're Alone", label: "Are we alone?" },
+  "poll-timetravel-teleport": { a: "Time Travel", b: "Teleportation", label: "Pick your superpower" },
+  "poll-simulation-reality": { a: "Simulation Theory", b: "Base Reality", label: "What is real?" },
 };
 
 // Common social media / SEO crawler user-agent fragments

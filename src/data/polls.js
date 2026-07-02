@@ -270,6 +270,36 @@ export const POLLS = [
     itemA: { id: "hubble", name: "Hubble", sub: "SPACE TELESCOPE SINCE 1990", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/3/3f/HST-SM4.jpeg" },
     itemB: { id: "jwst", name: "James Webb", sub: "NEXT-GEN SPACE TELESCOPE", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/f/f3/JWST_spacecraft_model_2.png" },
   },
+
+  // — Debates —
+  {
+    id: "poll-flatearth-globe",
+    category: "Debates",
+    label: "Shape of the Earth",
+    itemA: { id: "flat-earth", name: "Flat Earth", sub: "DISC-SHAPED EARTH THEORY", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/1/13/Orlando-Ferguson-flat-earth-map_edit.jpg" },
+    itemB: { id: "globe-earth", name: "Globe Earth", sub: "SCIENTIFIC CONSENSUS", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/9/97/The_Earth_seen_from_Apollo_17.jpg" },
+  },
+  {
+    id: "poll-aliens-alone",
+    category: "Debates",
+    label: "Are we alone?",
+    itemA: { id: "aliens-exist", name: "Aliens Exist", sub: "EXTRATERRESTRIAL LIFE", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/d/d0/Arecibo_message.svg" },
+    itemB: { id: "were-alone", name: "We're Alone", sub: "RARE EARTH HYPOTHESIS", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/b/be/Hubble_ultra_deep_field.jpg" },
+  },
+  {
+    id: "poll-timetravel-teleport",
+    category: "Debates",
+    label: "Pick your superpower",
+    itemA: { id: "time-travel", name: "Time Travel", sub: "MOVE THROUGH TIME", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/4/45/Wooden_hourglass_3.jpg" },
+    itemB: { id: "teleportation", name: "Teleportation", sub: "INSTANT TRAVEL ANYWHERE", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/6/60/Wormhole_travel_as_envisioned_by_Les_Bossinas_for_NASA.jpg" },
+  },
+  {
+    id: "poll-simulation-reality",
+    category: "Debates",
+    label: "What is real?",
+    itemA: { id: "simulation", name: "Simulation Theory", sub: "WE LIVE IN A SIMULATION", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/e/e0/Matrix_code.svg" },
+    itemB: { id: "base-reality", name: "Base Reality", sub: "THIS IS THE REAL WORLD", cat: "debates", img: "https://upload.wikimedia.org/wikipedia/commons/0/00/Crab_Nebula.jpg" },
+  },
 ];
 
-export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars", "Anime", "Music", "Gaming", "Finance", "Space"];
+export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars", "Anime", "Music", "Gaming", "Finance", "Space", "Debates"];
