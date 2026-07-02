@@ -28,6 +28,12 @@ const POLLS = {
   "poll-honda-toyota": { a: "Honda", b: "Toyota", label: "Reliability king", cat: "CARS" },
   "poll-lambo-ferrari": { a: "Lamborghini", b: "Ferrari", label: "Dream car duel", cat: "CARS" },
   "poll-tesla-porsche": { a: "Tesla", b: "Porsche", label: "Future vs heritage", cat: "CARS" },
+  "poll-bitcoin-ethereum": { a: "Bitcoin", b: "Ethereum", label: "King of crypto", cat: "FINANCE" },
+  "poll-sp500-nasdaq": { a: "S&P 500", b: "NASDAQ", label: "Best market index", cat: "FINANCE" },
+  "poll-buffett-musk": { a: "Warren Buffett", b: "Elon Musk", label: "Greatest investor", cat: "FINANCE" },
+  "poll-nasa-spacex": { a: "NASA", b: "SpaceX", label: "Who leads space exploration?", cat: "SPACE" },
+  "poll-mars-moon": { a: "Mars", b: "The Moon", label: "Where should we go next?", cat: "SPACE" },
+  "poll-hubble-jwst": { a: "Hubble", b: "James Webb", label: "Greatest space telescope", cat: "SPACE" },
 };
 
 export default function handler(req) {

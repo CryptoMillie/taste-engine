@@ -29,6 +29,12 @@ const POLLS = {
   "poll-honda-toyota": { a: "Honda", b: "Toyota", label: "Reliability king" },
   "poll-lambo-ferrari": { a: "Lamborghini", b: "Ferrari", label: "Dream car duel" },
   "poll-tesla-porsche": { a: "Tesla", b: "Porsche", label: "Future vs heritage" },
+  "poll-bitcoin-ethereum": { a: "Bitcoin", b: "Ethereum", label: "King of crypto" },
+  "poll-sp500-nasdaq": { a: "S&P 500", b: "NASDAQ", label: "Best market index" },
+  "poll-buffett-musk": { a: "Warren Buffett", b: "Elon Musk", label: "Greatest investor" },
+  "poll-nasa-spacex": { a: "NASA", b: "SpaceX", label: "Who leads space exploration?" },
+  "poll-mars-moon": { a: "Mars", b: "The Moon", label: "Where should we go next?" },
+  "poll-hubble-jwst": { a: "Hubble", b: "James Webb", label: "Greatest space telescope" },
 };
 
 // Common social media / SEO crawler user-agent fragments

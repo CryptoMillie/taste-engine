@@ -25,6 +25,8 @@ const CATEGORY_QUERIES: Record<string, string> = {
   movies: "top trending movies and TV shows 2026 site:wikipedia.org",
   anime: "top trending anime series and characters 2026 site:wikipedia.org",
   gaming: "most popular video games and esports 2026 site:wikipedia.org",
+  finance: "top investors billionaires companies stocks crypto 2026 site:wikipedia.org",
+  space: "space exploration missions planets NASA SpaceX 2026 site:wikipedia.org",
 };
 
 const corsHeaders = {

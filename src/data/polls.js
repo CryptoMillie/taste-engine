@@ -224,6 +224,52 @@ export const POLLS = [
     itemA: { id: "minecraft", name: "Minecraft", sub: "SANDBOX VIDEO GAME", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/en/5/51/Minecraft_cover.png" },
     itemB: { id: "fortnite", name: "Fortnite", sub: "BATTLE ROYALE GAME", cat: "gaming", img: "https://upload.wikimedia.org/wikipedia/commons/0/0e/FortniteLogo.svg" },
   },
+
+  // — Finance —
+  {
+    id: "poll-bitcoin-ethereum",
+    category: "Finance",
+    label: "King of crypto",
+    itemA: { id: "bitcoin", name: "Bitcoin", sub: "DECENTRALIZED CRYPTOCURRENCY", cat: "finance", img: "https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg" },
+    itemB: { id: "ethereum", name: "Ethereum", sub: "SMART CONTRACT PLATFORM", cat: "finance", img: "https://upload.wikimedia.org/wikipedia/commons/0/05/Ethereum_logo_2014.svg" },
+  },
+  {
+    id: "poll-sp500-nasdaq",
+    category: "Finance",
+    label: "Best market index",
+    itemA: { id: "sp500", name: "S&P 500", sub: "US STOCK MARKET INDEX", cat: "finance", img: "https://upload.wikimedia.org/wikipedia/commons/6/69/S%26P_500_Logo.svg" },
+    itemB: { id: "nasdaq", name: "NASDAQ", sub: "TECH-HEAVY STOCK INDEX", cat: "finance", img: "https://upload.wikimedia.org/wikipedia/commons/5/56/NASDAQ_Logo.svg" },
+  },
+  {
+    id: "poll-buffett-musk",
+    category: "Finance",
+    label: "Greatest investor",
+    itemA: { id: "warren-buffett", name: "Warren Buffett", sub: "CEO OF BERKSHIRE HATHAWAY", cat: "finance", img: "https://upload.wikimedia.org/wikipedia/commons/5/51/Warren_Buffett_KU_Visit.jpg" },
+    itemB: { id: "elon-musk", name: "Elon Musk", sub: "CEO OF TESLA & SPACEX", cat: "finance", img: "https://upload.wikimedia.org/wikipedia/commons/3/34/Elon_Musk_Royal_Society_%28crop2%29.jpg" },
+  },
+
+  // — Space —
+  {
+    id: "poll-nasa-spacex",
+    category: "Space",
+    label: "Who leads space exploration?",
+    itemA: { id: "nasa", name: "NASA", sub: "US SPACE AGENCY", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg" },
+    itemB: { id: "spacex", name: "SpaceX", sub: "PRIVATE SPACE COMPANY", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/2/2e/SpaceX_logo_black.svg" },
+  },
+  {
+    id: "poll-mars-moon",
+    category: "Space",
+    label: "Where should we go next?",
+    itemA: { id: "mars", name: "Mars", sub: "THE RED PLANET", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/0/02/OSIRIS_Mars_true_color.jpg" },
+    itemB: { id: "moon", name: "The Moon", sub: "EARTH'S NATURAL SATELLITE", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/e/e1/FullMoon2010.jpg" },
+  },
+  {
+    id: "poll-hubble-jwst",
+    category: "Space",
+    label: "Greatest space telescope",
+    itemA: { id: "hubble", name: "Hubble", sub: "SPACE TELESCOPE SINCE 1990", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/3/3f/HST-SM4.jpeg" },
+    itemB: { id: "jwst", name: "James Webb", sub: "NEXT-GEN SPACE TELESCOPE", cat: "space", img: "https://upload.wikimedia.org/wikipedia/commons/f/f3/JWST_spacecraft_model_2.png" },
+  },
 ];
 
-export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars", "Anime", "Music", "Gaming"];
+export const POLL_CATEGORIES = ["All", "Live", "Sports", "Food", "Tech", "Culture", "Animals", "Cars", "Anime", "Music", "Gaming", "Finance", "Space"];
